@@ -1,12 +1,12 @@
-import type { Priority } from '@relay-miden/shared';
-const priorities: Priority[] = ['low', 'medium', 'high', 'urgent'];
+import type { TaskPriority } from '@relay-miden/shared';
+const priorities: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
 export function PrioritySelector({
   value,
   onChange,
   name,
 }: {
-  value: Priority;
-  onChange: (priority: Priority) => void;
+  value: TaskPriority;
+  onChange: (priority: TaskPriority) => void;
   name: string;
 }) {
   return (

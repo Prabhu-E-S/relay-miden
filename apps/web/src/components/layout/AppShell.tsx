@@ -49,7 +49,7 @@ export function AppShell() {
           </main>
           <footer className="mt-7 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4 text-[10px] text-muted">
             <span>Relay Miden · When networks fail, communication shouldn’t.</span>
-            <span>Phase 1 — interface preview</span>
+            <span>Phase 2 — local task engine</span>
           </footer>
         </div>
         <MobileBottomNav />

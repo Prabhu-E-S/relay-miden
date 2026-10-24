@@ -1,10 +1,24 @@
+import { useEffect, useState } from 'react';
 import { Check, Globe2, ArrowUpRight, Network } from 'lucide-react';
 import { Link } from 'react-router';
 import { PageHeader } from '../components/ui/PageHeader';
 import { useLanguage } from '../hooks/use-language';
 import { languages } from '../lib/languages';
+import { taskRepository } from '../db/task-repository';
 export function SettingsPage() {
   const { t, language, setLanguage } = useLanguage();
+  const [deviceId, setDeviceId] = useState<string>();
+
+  useEffect(() => {
+    let active = true;
+    taskRepository.getDeviceId().then(
+      (value) => active && setDeviceId(value),
+      () => active && setDeviceId(undefined),
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
   return (
     <>
       <PageHeader
@@ -52,6 +66,19 @@ export function SettingsPage() {
             complete localization arrive in Phase 4.
           </p>
         </section>
+        <section className="panel mt-4 p-5">
+          <h2 className="text-base font-semibold">Anonymous device identity</h2>
+          <p className="mt-2 text-xs leading-relaxed text-muted">
+            Created once in IndexedDB and used as the author of local tasks. It is not an account
+            and is never sent anywhere in Phase 2.
+          </p>
+          <p
+            className="mt-3 break-all font-mono text-[10px] text-brand"
+            aria-label="Device identifier"
+          >
+            {deviceId ?? 'Loading…'}
+          </p>
+        </section>
         <Link
           to="/connections"
           className="panel mt-4 flex min-h-16 items-center gap-3 p-4 text-sm font-medium"
@@ -61,9 +88,9 @@ export function SettingsPage() {
           <ArrowUpRight size={17} className="ml-auto" />
         </Link>
         <div className="mt-6 text-xs leading-relaxed text-muted">
-          <p className="font-medium text-brand">Relay Miden · Phase 1</p>
+          <p className="font-medium text-brand">Relay Miden · Phase 2</p>
           <p className="mt-2">Works Anyway · Devin Hacks Kochi</p>
-          <p>No sign-in. No paid services. No task data is stored yet.</p>
+          <p>No sign-in. No paid services. Task data stays in this browser.</p>
         </div>
       </div>
     </>
