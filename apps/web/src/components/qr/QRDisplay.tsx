@@ -7,14 +7,18 @@ import {
   PaperBridgeError,
   type EncodeTaskResult,
 } from '../../services/paperbridge';
+import { useLanguage } from '../../hooks/use-language';
 
 export function QRDisplay({ task, deviceId }: { task: Task; deviceId: string }) {
+  const { dict, formatTaskTitle } = useLanguage();
   const [encoding, setEncoding] = useState<EncodeTaskResult | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [refreshSeed, setRefreshSeed] = useState(0);
+
+  const displayTitle = formatTaskTitle(task);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,7 +82,7 @@ export function QRDisplay({ task, deviceId }: { task: Task; deviceId: string }) 
           role="status"
         >
           <RefreshCw size={28} className="animate-spin text-brand" aria-hidden="true" />
-          <p className="text-xs font-medium">Generating scannable QR…</p>
+          <p className="text-xs font-medium">{dict.paperbridge.generatingQR}</p>
         </div>
       ) : error ? (
         <div
@@ -87,7 +91,7 @@ export function QRDisplay({ task, deviceId }: { task: Task; deviceId: string }) 
         >
           <div className="flex items-center justify-center gap-2 text-danger">
             <AlertTriangle size={18} />
-            <span className="text-xs font-semibold">QR Generation Error</span>
+            <span className="text-xs font-semibold">{dict.paperbridge.qrErrorTitle}</span>
           </div>
           <p className="mt-2 text-xs leading-relaxed text-muted">{error}</p>
         </div>
@@ -96,11 +100,11 @@ export function QRDisplay({ task, deviceId }: { task: Task; deviceId: string }) 
           <div className="mx-auto flex w-full max-w-72 flex-col items-center rounded-lg border border-line bg-white p-4 shadow-none">
             <img
               src={qrDataUrl}
-              alt={`PaperBridge QR code for task: ${task.title}`}
+              alt={`PaperBridge QR code for task: ${displayTitle}`}
               className="aspect-square w-full max-w-64 object-contain"
             />
             <div className="mt-3 flex w-full items-center justify-between text-[11px] text-muted">
-              <span>{encoding.byteSize} bytes</span>
+              <span>{dict.paperbridge.bytesLabel(encoding.byteSize)}</span>
               <span className="font-mono text-[10px]">
                 {encoding.envelope.checksum.slice(0, 10)}…
               </span>
@@ -108,7 +112,7 @@ export function QRDisplay({ task, deviceId }: { task: Task; deviceId: string }) 
           </div>
 
           <p className="mx-auto mt-4 max-w-xs text-center text-xs leading-relaxed text-muted">
-            Scan this QR on another device to transfer the task without internet or Wi-Fi.
+            {dict.paperbridge.scanInstructions}
           </p>
 
           <div className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -118,7 +122,7 @@ export function QRDisplay({ task, deviceId }: { task: Task; deviceId: string }) 
               className="button-primary justify-center text-center no-underline"
             >
               <Download size={17} />
-              Download QR
+              {dict.paperbridge.downloadQRButton}
             </a>
             <button
               type="button"
@@ -126,7 +130,7 @@ export function QRDisplay({ task, deviceId }: { task: Task; deviceId: string }) 
               className="button-secondary justify-center"
             >
               {copied ? <Check size={17} className="text-brand" /> : <Copy size={17} />}
-              {copied ? 'Copied Payload!' : 'Copy Payload'}
+              {copied ? dict.paperbridge.copiedPayloadButton : dict.paperbridge.copyPayloadButton}
             </button>
           </div>
 
@@ -136,7 +140,7 @@ export function QRDisplay({ task, deviceId }: { task: Task; deviceId: string }) 
               onClick={handleRegenerate}
               className="text-[11px] text-muted underline hover:text-brand"
             >
-              Regenerate QR ID
+              {dict.paperbridge.regenerateButton}
             </button>
           </div>
         </div>

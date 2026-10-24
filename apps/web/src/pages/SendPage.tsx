@@ -9,7 +9,7 @@ import { taskRepository } from '../db/task-repository';
 import { useLanguage } from '../hooks/use-language';
 
 export function SendPage() {
-  const { t } = useLanguage();
+  const { dict, formatTaskTitle } = useLanguage();
   const [params, setParams] = useSearchParams();
   const tasks = useLiveQuery(() => taskRepository.getAllTasks(), []);
   const [deviceId, setDeviceId] = useState<string>();
@@ -34,8 +34,8 @@ export function SendPage() {
   return (
     <>
       <PageHeader
-        title={t.send}
-        description="Transfer tasks across devices via offline QR codes. No internet, Wi-Fi, or cloud server required."
+        title={dict.paperbridge.sendTitle}
+        description={dict.paperbridge.sendDescription}
       />
       {!tasks ? (
         <div className="panel max-w-md p-5" role="status">
@@ -44,7 +44,7 @@ export function SendPage() {
       ) : task ? (
         <section className="panel max-w-md p-4 md:p-6">
           <label className="field mb-4">
-            Local task
+            {dict.paperbridge.selectTaskToSend}
             <select
               className="control"
               value={task.id}
@@ -52,7 +52,7 @@ export function SendPage() {
             >
               {tasks.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.title}
+                  {formatTaskTitle(item)}
                 </option>
               ))}
             </select>

@@ -229,7 +229,7 @@ export class TaskRepository {
             updatedAt: this.now(),
             revision: existing.revision + 1,
           };
-          for (const field of ['description', 'quantity', 'unit'] as const) {
+          for (const field of ['description', 'quantity', 'unit', 'instruction'] as const) {
             if (candidate[field] === null) delete candidate[field];
           }
           if (candidate.quantity === undefined) delete candidate.unit;
@@ -405,6 +405,7 @@ export class TaskRepository {
       createdBy: payload.createdBy,
       revision: payload.revision,
       deletedAt: null,
+      ...(payload.instruction ? { instruction: payload.instruction } : {}),
     });
 
     const actorId = await this.getDeviceId();

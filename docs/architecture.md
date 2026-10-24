@@ -1,8 +1,8 @@
 # Relay Miden architecture
 
-## Phase 3 boundary
+## Phase 4 boundary
 
-Relay Miden is an npm-workspaces monorepo with an offline-first React interface, a minimal Express health process, and a shared TypeScript package with Zod validation schemas. With Phase 3 completed, task coordination includes **PaperBridge offline QR transfer**: versioned encoding, canonical serialization, SHA-256 checksum verification, scannable QR generation, PNG export, clipboard payload copy, local browser camera scanning, client-side QR image upload, pre-import review, duplicate detection, and atomic IndexedDB ingestion. All QR generation, decoding, hashing, and database writes occur entirely within the browser without cloud APIs, servers, or external networks. The existing root LICENSE is preserved.
+Relay Miden is an npm-workspaces monorepo with an offline-first React interface, a minimal Express health process, and a shared TypeScript package with Zod validation schemas. Phase 4 adds offline multilingual communication: canonical structured task instructions are stored and transferred unchanged, then rendered through bundled English, Malayalam, and Tamil templates on each device. PaperBridge QR transfer remains version 1 and retains its checksum, message identity, duplicate, conflict, and soft-delete protections. All translation, QR, and database work occurs inside the browser without cloud APIs or runtime network requests.
 
 ## Frontend
 
@@ -14,6 +14,7 @@ Relay Miden is an npm-workspaces monorepo with an offline-first React interface,
 - `components/qr/QRDisplay.tsx`: Renders real scannable QR codes, PNG download buttons, payload copying, and payload size metrics.
 - `components/qr/QRReceiver.tsx`: Multi-mode offline receiver with user-activated camera scanning (`html5-qrcode`), local client-side image file decoding (`jsQR`), visual pre-import task review, and atomic import execution.
 - `components/layout/DatabaseProvider.tsx`: Initializes the database on application startup, managing loading and error fallback states gracefully.
+- `i18n/`: Bundled dictionaries, language-specific sentence templates, and safe structured-task display formatters. `LanguageProvider` persists the selected interface language locally and immediately re-renders structured instructions without changing stored task data.
 - Pages assemble reusable layout, dashboard, task, and UI components. The dashboard aggregates live statistics and recent tasks directly from IndexedDB via `useLiveQuery`.
 - The route map is `/`, `/create`, `/tasks`, `/tasks/:id`, `/send`, `/receive`, `/connections`, and `/settings`, with fallback views.
 - Status transitions follow strict lifecycle progression: pending -> acknowledged -> in_progress -> completed, with an explicit reopen flow.
@@ -32,6 +33,7 @@ DM Sans is bundled locally with Fontsource; Malayalam and Tamil use available sy
 - `TaskSchema`, `CreateTaskInputSchema`, `UpdateTaskInputSchema`
 - `TaskOperationSchema`, `TaskOperationTypeSchema` (including `'TASK_IMPORT'`)
 - `TaskStatusSchema`, `TaskPrioritySchema`, `TaskActionSchema`
+- `SupportedLanguageSchema`, `TaskActionCodeSchema`, `TaskItemCodeSchema`, `TaskUnitCodeSchema`, and optional `StructuredTaskInstructionSchema`
 - Status transition validator `isValidStatusTransition`
 - `PaperBridgeEnvelopeSchema`, `PaperBridgeTaskPayloadSchema`, `PaperBridgeError`
 - Protocol constants: `PaperBridgeProtocolIdentifier = 'RELAY_MIDEN_PAPERBRIDGE'`, `PAPERBRIDGE_PROTOCOL_VERSION = 1`, `MAX_PAPERBRIDGE_PAYLOAD_BYTES = 2048`
@@ -60,6 +62,8 @@ User intent -> validated task command -> IndexedDB transaction -> local UI (reac
 
 Every mutation creates an atomic transaction updating `tasks` and appending a serializable `TaskOperation` record with revision and parent revision tracking. Tasks imported via PaperBridge are recorded as `TASK_IMPORT` with the receiving device as actor, the source message ID in the `imports` ledger for duplicate suppression, and the original creator and revision preserved.
 
+Structured instructions are optional to preserve Phase 2 free-text tasks. A structured task stores canonical action, item, unit, quantity, location, and optional notes; its visible sentence is derived at render time from the current language. Free-text titles, locations, and notes remain exactly as entered and are never passed through a translation service.
+
 ## Implemented PaperBridge offline transfer
 
 Phase 3 implements versioned transfer envelopes (`RELAY_MIDEN_PAPERBRIDGE`, version 1).
@@ -69,6 +73,7 @@ Phase 3 implements versioned transfer envelopes (`RELAY_MIDEN_PAPERBRIDGE`, vers
 - **Send screen**: Generates real scannable QR matrices, PNG download files, and clipboard payload export.
 - **Receive screen**: Supports live camera scanning with rear camera preference, automatic camera cleanup, browser insecure context fallback, and 100% offline image file decoding via client-side Canvas and `jsQR`.
 - **Pre-import preview**: Presents full task metadata, priority indicator, sender device identity, and creation timestamp for explicit user confirmation.
+- **Multilingual payloads**: The optional canonical instruction is included in the existing task payload. Receivers can render it in their selected supported language while legacy envelopes without an instruction continue to import unchanged.
 - **Duplicate & Conflict suppression**: Deduplicates identical message IDs and revisions; guards against overwriting differing local revisions or resurrecting soft-deleted tasks.
 
 Phase 5 will add bidirectional lifecycle QR messages (task acknowledgment and status progression).

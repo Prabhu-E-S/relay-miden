@@ -6,7 +6,7 @@ import { useLanguage } from '../hooks/use-language';
 import { languages } from '../lib/languages';
 import { taskRepository } from '../db/task-repository';
 export function SettingsPage() {
-  const { t, language, setLanguage } = useLanguage();
+  const { dict, language, setLanguage } = useLanguage();
   const [deviceId, setDeviceId] = useState<string>();
 
   useEffect(() => {
@@ -19,17 +19,17 @@ export function SettingsPage() {
       active = false;
     };
   }, []);
+
+  const currentLangName = languages.find((item) => item.code === language)?.name ?? 'English';
+
   return (
     <>
-      <PageHeader
-        title={t.settings}
-        description="Make coordination feel familiar. Start with the language you use every day."
-      />
+      <PageHeader title={dict.settings.title} description={dict.settings.description} />
       <div className="max-w-xl">
         <section className="panel p-5">
           <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
             <Globe2 size={18} />
-            Interface language
+            {dict.settings.languageSectionTitle}
           </h2>
           <fieldset>
             <legend className="sr-only">Choose interface language</legend>
@@ -61,16 +61,14 @@ export function SettingsPage() {
             ))}
           </fieldset>
           <p role="status" className="mt-4 text-xs leading-relaxed text-muted">
-            {languages.find((item) => item.code === language)?.name} navigation selected for this
-            session. Only navigation and selected headings are translated. Task templates and
-            complete localization arrive in Phase 4.
+            {currentLangName} navigation selected for this session.{' '}
+            {dict.settings.languageDescription(currentLangName)}
           </p>
         </section>
         <section className="panel mt-4 p-5">
-          <h2 className="text-base font-semibold">Anonymous device identity</h2>
+          <h2 className="text-base font-semibold">{dict.settings.deviceSectionTitle}</h2>
           <p className="mt-2 text-xs leading-relaxed text-muted">
-            Created once in IndexedDB and used as the author of local tasks. It is not an account
-            and is never sent anywhere in Phase 2.
+            {dict.settings.deviceDescription}
           </p>
           <p
             className="mt-3 break-all font-mono text-[10px] text-brand"
@@ -88,9 +86,9 @@ export function SettingsPage() {
           <ArrowUpRight size={17} className="ml-auto" />
         </Link>
         <div className="mt-6 text-xs leading-relaxed text-muted">
-          <p className="font-medium text-brand">Relay Miden · Phase 2</p>
-          <p className="mt-2">Works Anyway · Devin Hacks Kochi</p>
-          <p>No sign-in. No paid services. Task data stays in this browser.</p>
+          <p className="font-medium text-brand">Relay Miden · Phase 4</p>
+          <p className="mt-2">Works Anyway · Offline Multilingual Communication</p>
+          <p>{dict.settings.offlineFooter}</p>
         </div>
       </div>
     </>

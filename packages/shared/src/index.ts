@@ -1,5 +1,6 @@
 export * from './tasks.js';
 export * from './paperbridge.js';
+export * from './multilingual.js';
 
 export type Language = 'en' | 'ml' | 'ta';
 

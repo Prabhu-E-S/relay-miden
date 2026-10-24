@@ -6,9 +6,18 @@ Relay Miden is an offline-first, multilingual task-coordination project for the 
 
 ## Current status
 
-**Phase 3 implemented and verified on 24 October 2026.** PaperBridge offline QR communication is fully functional. Tasks can be exported as scannable QR codes or PNG images, and imported on disconnected receiving devices via live camera scanning or client-side QR image upload. All encoding, canonical serialization, SHA-256 checksum verification, and atomic IndexedDB persistence operate entirely within the browser without cloud APIs, servers, or external networks. Phase 4 has not been started.
+**Phase 4 implemented and verified on 25 October 2026.** Relay Miden now stores language-independent structured task instructions and renders them locally in English, Malayalam, or Tamil. PaperBridge v1 preserves these canonical instruction codes across disconnected devices while each receiver chooses its own display language. No translation API, cloud service, or runtime network request is used.
 
 ### Implemented
+
+- **Offline multilingual task communication (Phase 4)**:
+  - Bundled English (`en`), Malayalam (`ml`), and Tamil (`ta`) dictionaries for structured task actions, items, units, priorities, statuses, and task/QR workflow labels.
+  - Backward-compatible optional `StructuredTaskInstruction` with Zod-validated canonical action, item, and unit codes.
+  - Language-specific task templates that render structured instructions immediately without mutating task IDs, revisions, or stored canonical data.
+  - Persisted local language preference with an English default; selected language restores after refresh.
+  - Structured task creation with localized action/item/unit controls, live instruction preview, optional notes, and continued free-text task support.
+  - Multilingual structured task display in task lists, task details, PaperBridge send, and PaperBridge receive previews.
+  - PaperBridge v1 structured-instruction round trips, checksum protection, duplicate prevention, and legacy QR compatibility.
 
 - **PaperBridge QR Protocol (`RELAY_MIDEN_PAPERBRIDGE` v1)**:
   - Versioned envelope format with unique message ID, sender device ID, creation timestamp, and validated task payload.
@@ -51,11 +60,11 @@ Relay Miden is an offline-first, multilingual task-coordination project for the 
 
 ### In progress
 
-- No active implementation phase. Phase 3 verification is complete; the project is ready for a separately authorized Phase 4 (Multilingual communication & localized templates).
+- No active implementation phase. Phase 4 verification is complete.
 
 ### Planned
 
-Two-way QR task lifecycle (acknowledgments & status updates), local Wi-Fi/LAN transport, synchronization queues, complete English/Malayalam/Tamil task templates, and installable PWA behavior. All core functionality must work without paid APIs or cloud infrastructure.
+Two-way QR task lifecycle (acknowledgments & status updates), local Wi-Fi/LAN transport, synchronization queues, installable PWA behavior, final operational UI, and demo preparation. All core functionality must work without paid APIs or cloud infrastructure.
 
 ## PaperBridge: How to Transfer Tasks Offline
 
@@ -161,7 +170,7 @@ Forest Green `#004225`, Beige `#F5F5DC`, Amber `#FFB000`, and Peach `#FFCF9D` ar
 1. Repository setup and design system — implemented and verified.
 2. Offline task engine — implemented and verified.
 3. PaperBridge QR protocol — implemented and verified.
-4. Multilingual communication — planned.
+4. Multilingual communication — implemented and verified.
 5. Two-way QR task lifecycle — planned.
 6. Local Wi-Fi communication — planned.
 7. Offline queue and synchronization — planned.
@@ -169,29 +178,29 @@ Forest Green `#004225`, Beige `#F5F5DC`, Amber `#FFB000`, and Peach `#FFCF9D` ar
 9. Final UI and mission control — planned.
 10. Testing and demo preparation — planned.
 
-See [implementation-plan.md](docs/implementation-plan.md), [architecture.md](docs/architecture.md), and [paperbridge-protocol.md](docs/paperbridge-protocol.md) for boundaries and technical details.
+See [implementation-plan.md](docs/implementation-plan.md), [architecture.md](docs/architecture.md), [paperbridge-protocol.md](docs/paperbridge-protocol.md), and [multilingual-protocol.md](docs/multilingual-protocol.md) for boundaries and technical details.
 
 ## Verification results
 
-Verified on 24 October 2026 with Node 24.15.0, npm 11.12.1, and Chromium on Windows:
+Verified through 25 October 2026 with Node 24.15.0, npm 11.12.1, and Chromium on Windows:
 
-| Check                       | Actual result                                                                                                                            |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Dependency installation     | Passed; zero vulnerabilities reported by npm                                                                                             |
-| `npm run dev`               | Both workspace servers started; frontend returned HTTP 200                                                                               |
-| Live `GET /health`          | HTTP 200 with `{ "status": "ok", "service": "relay-miden-server", "phase": 2 }`                                                          |
-| `npm run typecheck`         | Passed for web, server, and shared with zero errors                                                                                      |
-| `npm run lint`              | Passed with zero warnings                                                                                                                |
-| `npm test`                  | 57 tests passed across 4 files (`paperbridge.test.ts`, `task-repository.test.ts`, `task-form.test.ts`, `app.test.ts`)                    |
-| `npm run build`             | Shared/server TypeScript builds and production Vite build passed                                                                         |
-| `npm run test:e2e`          | 15 test suites passed (multi-device transfer across isolated contexts, duplicate protection, 56 route/width combinations at 320..1440px) |
-| Responsive coverage         | Verified across 7 viewport widths without horizontal overflow or uncaught page errors                                                    |
-| Multi-device QR transfer    | Verified end-to-end task export, image upload, decoding, pre-import review, and persistence across isolated browser contexts             |
-| Duplicate suppression       | Rescanning same QR code displays "Task Already Present" without creating duplicate tasks or duplicate operation logs                     |
-| Offline CRUD & Persistence  | Task creation, inline edit, status updates, reopen, and soft deletion persist across browser reloads in IndexedDB                        |
-| Reactive Dashboard          | Dashboard counters and recent tasks update reactively via `useLiveQuery` without backend calls                                           |
-| Palette and indicator fills | Exact rendered palette verified; metric, priority, and status backgrounds transparent; brand hex values centralized in palette.css       |
-| `npm run format:check`      | Passed with 100% Prettier compliance                                                                                                     |
+| Check                       | Actual result                                                                                                                      |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Dependency installation     | Passed; zero vulnerabilities reported by npm                                                                                       |
+| `npm run dev`               | Both workspace servers started; frontend returned HTTP 200                                                                         |
+| Live `GET /health`          | HTTP 200 with `{ "status": "ok", "service": "relay-miden-server", "phase": 2 }`                                                    |
+| `npm run typecheck`         | Passed for web, server, and shared with zero errors                                                                                |
+| `npm run lint`              | Passed with zero warnings                                                                                                          |
+| `npm test`                  | 80 tests passed across 6 files, including dictionary, template, legacy, and structured PaperBridge round-trip coverage             |
+| `npm run build`             | Shared/server TypeScript builds and production Vite build passed                                                                   |
+| `npm run test:e2e`          | 16 Playwright tests passed: responsive routes, legacy CRUD, language persistence, structured previews, and PaperBridge transfer    |
+| Responsive coverage         | Verified across 7 viewport widths without horizontal overflow or uncaught page errors                                              |
+| Multi-device QR transfer    | Verified end-to-end task export, image upload, decoding, pre-import review, and persistence across isolated browser contexts       |
+| Duplicate suppression       | Rescanning same QR code displays "Task Already Present" without creating duplicate tasks or duplicate operation logs               |
+| Offline CRUD & Persistence  | Task creation, inline edit, status updates, reopen, and soft deletion persist across browser reloads in IndexedDB                  |
+| Reactive Dashboard          | Dashboard counters and recent tasks update reactively via `useLiveQuery` without backend calls                                     |
+| Palette and indicator fills | Exact rendered palette verified; metric, priority, and status backgrounds transparent; brand hex values centralized in palette.css |
+| `npm run format:check`      | Passed with 100% Prettier compliance                                                                                               |
 
 ## Known limitations
 
@@ -199,7 +208,7 @@ Verified on 24 October 2026 with Node 24.15.0, npm 11.12.1, and Chromium on Wind
 - Single QR payloads are capped at 2,048 bytes to ensure reliable scanning on mobile camera viewfinders.
 - Connectivity cards remain demonstration status indicators; live LAN detection and Wi-Fi sync arrive in Phase 6.
 - Full service worker caching and offline startup installation arrive in Phase 8 (PWA).
-- Language switching applies to navigation and selected headings; full multilingual templates and translation arrive in Phase 4.
+- Structured task codes and selected workflow UI are translated locally. Arbitrary locations and notes remain in the original language, by design; this phase does not claim free-form translation.
 
 ## Development history
 
@@ -208,5 +217,6 @@ Every Codex execution must update this README and create a unique, immutable Mar
 - [Phase 1 initialization and verification — 2026-10-24](docs/history/phase-01-20261024T142943Z-9c4b1e.md)
 - [Phase 2 recovery and verification — 2026-10-24](docs/history/phase-02-recovery-20261024T153500Z-a7f3c2.md)
 - [Phase 3 PaperBridge QR communication and verification — 2026-10-24](docs/history/phase-03-20261024T173000Z-d4e8c1.md)
+- [Phase 4 multilingual communication audit, fixes, and verification — 2026-10-25](docs/history/phase-04-20261024T185518Z-b1e5d9.md)
 
-No Git commands were executed during Phase 1, Phase 2, or Phase 3. The original MIT [LICENSE](LICENSE) is preserved.
+No Git commands were executed during Phase 1, Phase 2, Phase 3, or Phase 4. The original MIT [LICENSE](LICENSE) is preserved.

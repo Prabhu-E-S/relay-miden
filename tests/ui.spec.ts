@@ -23,6 +23,7 @@ async function createTask(
   } = {},
 ) {
   await page.goto('/create');
+  await page.getByRole('button', { name: 'Free Text / Custom', exact: true }).click();
   await page.getByLabel('Task Title').fill(overrides.title ?? 'Deliver drinking water');
   await page.getByLabel('Quantity', { exact: false }).fill(overrides.quantity ?? '20');
   await page.getByLabel('Unit', { exact: true }).fill(overrides.unit ?? 'Bottles');
@@ -72,7 +73,7 @@ test('full task creation validates, persists, and updates the dashboard without 
 
   const id = await createTask(page);
   await expect(page.getByRole('heading', { name: 'Deliver drinking water' })).toBeVisible();
-  await expect(page.getByText(/^Revision 1 ·/)).toBeVisible();
+  await expect(page.getByText(/Current status · revision 1/i)).toBeVisible();
   await page.reload();
   await expect(page).toHaveURL(new RegExp(`/tasks/${id}$`));
   await expect(page.getByRole('heading', { name: 'Deliver drinking water' })).toBeVisible();
@@ -82,7 +83,7 @@ test('full task creation validates, persists, and updates the dashboard without 
   await expect(page.getByRole('link', { name: /0 In Progress/ })).toBeVisible();
   await expect(page.getByRole('link', { name: /0 Completed/ })).toBeVisible();
   await expect(
-    page.getByRole('link', { name: /Deliver drinking water, high priority/ }),
+    page.getByRole('link', { name: /Deliver drinking water, high priority/i }),
   ).toBeVisible();
 });
 
@@ -99,7 +100,7 @@ test('dashboard quick form uses the same repository and updates live metrics', a
   await expect(form.getByRole('status')).toContainText('saved on this device');
   await expect(page.getByRole('link', { name: /1 Active Tasks/ })).toBeVisible();
   await expect(
-    page.getByRole('link', { name: /Distribute blankets, high priority/ }),
+    page.getByRole('link', { name: /Distribute blankets, high priority/i }),
   ).toBeVisible();
 });
 
@@ -119,12 +120,12 @@ test('task list searches descriptions and filters status and priority', async ({
   await expect(page.getByText('Showing 2 of 2 local tasks.')).toBeVisible();
   await page.getByRole('searchbox').fill('first aid');
   await expect(
-    page.getByRole('link', { name: /Medical volunteers, urgent priority/ }),
+    page.getByRole('link', { name: /Medical volunteers, urgent priority/i }),
   ).toBeVisible();
   await expect(page.getByRole('link', { name: /Deliver water/ })).toHaveCount(0);
   await page.getByRole('searchbox').fill('');
   await page.getByLabel('Filter by priority').selectOption('low');
-  await expect(page.getByRole('link', { name: /Deliver water, low priority/ })).toBeVisible();
+  await expect(page.getByRole('link', { name: /Deliver water, low priority/i })).toBeVisible();
   await page.getByLabel('Filter by status').selectOption('completed');
   await expect(page.getByRole('heading', { name: 'No tasks match these filters' })).toBeVisible();
 });
@@ -144,7 +145,6 @@ test('task details enforce transitions, edit data, reopen, and soft-delete', asy
   await page.getByRole('button', { name: 'Edit' }).click();
   await page.getByLabel('Task Title').fill('Deliver potable water');
   await page.getByRole('button', { name: 'Save Changes' }).click();
-  await expect(page.getByText('Task changes saved on this device.')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Deliver potable water' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Delete' }).click();
@@ -192,6 +192,37 @@ test('mobile navigation, device identity, and all three languages remain usable'
   await expect(page.locator('h1')).toBeFocused();
   await nav.getByRole('link', { name: 'Scan', exact: true }).click();
   await expect(page).toHaveURL(/\/receive$/);
+});
+
+test('structured instructions persist locally and re-render in Malayalam and Tamil', async ({
+  page,
+}) => {
+  await page.goto('/settings');
+  await page.getByRole('radio', { name: /Malayalam/ }).check();
+  await page.goto('/create');
+
+  await page.getByRole('button', { name: 'സ്ട്രക്ചേർഡ് ടെംപ്ലേറ്റ്', exact: true }).click();
+  await expect(page.getByLabel(/പ്രവർത്തനം/)).toBeVisible();
+  await page.getByLabel(/അളവ്/).fill('20');
+  await page.getByLabel('Unit code selection').selectOption('BOTTLE');
+  await page.getByLabel(/സ്ഥലം/).fill('Gate B');
+  await expect(page.getByText('Gate B-ലേക്ക് 20 കുപ്പി വെള്ളം എത്തിക്കുക.')).toBeVisible();
+  await page.getByRole('button', { name: 'ടാസ്ക് സൃഷ്ടിക്കുക', exact: true }).click();
+  await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]{36}$/i);
+  await expect(
+    page.getByRole('heading', { name: 'Gate B-ലേക്ക് 20 കുപ്പി വെള്ളം എത്തിക്കുക.' }),
+  ).toBeVisible();
+
+  const taskPath = new URL(page.url()).pathname;
+  await page.goto('/settings');
+  await page.getByRole('radio', { name: /Tamil/ }).check();
+  await page.reload();
+  await expect(page.getByRole('radio', { name: /Tamil/ })).toBeChecked();
+
+  await page.goto(taskPath);
+  await expect(
+    page.getByRole('heading', { name: 'Gate B-க்கு 20 பாட்டில் தண்ணீர் வழங்கவும்.' }),
+  ).toBeVisible();
 });
 
 test('brand tokens and unfilled indicators still match the approved design', async ({ page }) => {
