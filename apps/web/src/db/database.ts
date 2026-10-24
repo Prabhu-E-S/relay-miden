@@ -9,10 +9,18 @@ export interface LocalSetting {
   updatedAt: string;
 }
 
+export interface PaperBridgeImportRecord {
+  messageId: string;
+  taskId: string;
+  senderId: string;
+  importedAt: string;
+}
+
 export class RelayMidenDatabase extends Dexie {
   tasks!: EntityTable<Task, 'id'>;
   operations!: EntityTable<TaskOperation, 'operationId'>;
   settings!: EntityTable<LocalSetting, 'key'>;
+  imports!: EntityTable<PaperBridgeImportRecord, 'messageId'>;
 
   constructor(name = DATABASE_NAME) {
     super(name);
@@ -20,6 +28,9 @@ export class RelayMidenDatabase extends Dexie {
       tasks: 'id, status, priority, action, createdAt, updatedAt, deletedAt, [status+updatedAt]',
       operations: 'operationId, taskId, operationType, timestamp, revision, [taskId+revision]',
       settings: 'key, updatedAt',
+    });
+    this.version(2).stores({
+      imports: 'messageId, taskId, importedAt',
     });
   }
 }

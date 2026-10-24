@@ -2,11 +2,14 @@ import { z } from 'zod';
 import {
   CreateTaskInputSchema,
   isValidStatusTransition,
+  PaperBridgeEnvelopeSchema,
   TaskOperationSchema,
   TaskSchema,
   TaskStatusSchema,
   UpdateTaskInputSchema,
+  verifyEnvelopeChecksum,
   type CreateTaskInput,
+  type PaperBridgeEnvelope,
   type Task,
   type TaskOperation,
   type TaskOperationType,
@@ -14,7 +17,7 @@ import {
   type TaskStatus,
   type UpdateTaskInput,
 } from '@relay-miden/shared';
-import { db, type RelayMidenDatabase } from './database';
+import { db, type PaperBridgeImportRecord, type RelayMidenDatabase } from './database';
 import { TaskRepositoryError } from './errors';
 
 const DeviceIdSchema = z.uuid();
@@ -33,6 +36,24 @@ export interface TaskStatistics {
   inProgress: number;
   completed: number;
 }
+
+export type ImportTaskResult =
+  | {
+      status: 'imported';
+      task: Task;
+      message: string;
+    }
+  | {
+      status: 'duplicate';
+      task: Task;
+      message: string;
+    }
+  | {
+      status: 'conflict';
+      code: 'REVISION_CONFLICT' | 'TASK_DELETED_LOCALLY';
+      task: Task;
+      message: string;
+    };
 
 export interface TaskRepositoryDependencies {
   now?: () => string;
@@ -297,6 +318,156 @@ export class TaskRepository {
       .equals(taskId)
       .sortBy('revision');
     return operations.map((operation) => TaskOperationSchema.parse(operation));
+  }
+
+  async importPaperBridgeTask(envelope: PaperBridgeEnvelope): Promise<ImportTaskResult> {
+    const envelopeResult = PaperBridgeEnvelopeSchema.safeParse(envelope);
+    if (!envelopeResult.success) {
+      throw this.invalidInput(envelopeResult.error);
+    }
+    const validatedEnvelope = envelopeResult.data;
+    const isValidChecksum = await verifyEnvelopeChecksum(validatedEnvelope);
+    if (!isValidChecksum) {
+      throw new TaskRepositoryError(
+        'QR checksum verification failed. The task data is corrupted or modified.',
+        'INVALID_INPUT',
+      );
+    }
+
+    const { payload } = validatedEnvelope;
+
+    // Check if this specific message ID was already imported
+    const existingImport = await this.database.imports.get(validatedEnvelope.messageId);
+    if (existingImport) {
+      const existingTask = await this.database.tasks.get(existingImport.taskId);
+      if (existingTask) {
+        return {
+          status: 'duplicate',
+          task: TaskSchema.parse(existingTask),
+          message: 'Task already imported.',
+        };
+      }
+    }
+
+    // Check if the task ID already exists locally (including soft-deleted)
+    const existingTaskRecord = await this.database.tasks.get(payload.taskId);
+    if (existingTaskRecord) {
+      const existingTask = TaskSchema.parse(existingTaskRecord);
+
+      // Do not silently resurrect locally deleted tasks
+      if (existingTask.deletedAt) {
+        return {
+          status: 'conflict',
+          code: 'TASK_DELETED_LOCALLY',
+          task: existingTask,
+          message: 'This task was deleted locally on this device and cannot be imported.',
+        };
+      }
+
+      // Check revision
+      if (existingTask.revision === payload.revision) {
+        // Record the import for deduplication
+        await this.database.imports.put({
+          messageId: validatedEnvelope.messageId,
+          taskId: existingTask.id,
+          senderId: validatedEnvelope.senderId,
+          importedAt: this.now(),
+        });
+        return {
+          status: 'duplicate',
+          task: existingTask,
+          message: 'Task is already present on this device with identical revision.',
+        };
+      }
+
+      // Conflict: different revision exists locally
+      return {
+        status: 'conflict',
+        code: 'REVISION_CONFLICT',
+        task: existingTask,
+        message: `Conflict detected: Local task is at revision ${existingTask.revision}, but imported task is at revision ${payload.revision}. Local data preserved.`,
+      };
+    }
+
+    // New task import
+    const task = TaskSchema.parse({
+      id: payload.taskId,
+      action: payload.action,
+      title: payload.title,
+      ...(payload.description ? { description: payload.description } : {}),
+      ...(payload.quantity !== undefined ? { quantity: payload.quantity } : {}),
+      ...(payload.unit ? { unit: payload.unit } : {}),
+      location: payload.location,
+      priority: payload.priority,
+      status: payload.status,
+      createdAt: payload.createdAt,
+      updatedAt: payload.updatedAt,
+      createdBy: payload.createdBy,
+      revision: payload.revision,
+      deletedAt: null,
+    });
+
+    const actorId = await this.getDeviceId();
+    const operation = TaskOperationSchema.parse({
+      operationId: this.operationId(),
+      taskId: task.id,
+      actorId,
+      operationType: 'TASK_IMPORT',
+      timestamp: this.now(),
+      revision: task.revision,
+      parentRevision: null,
+      payload: task,
+      messageId: validatedEnvelope.messageId,
+    });
+
+    const importRecord: PaperBridgeImportRecord = {
+      messageId: validatedEnvelope.messageId,
+      taskId: task.id,
+      senderId: validatedEnvelope.senderId,
+      importedAt: this.now(),
+    };
+
+    try {
+      await this.database.transaction(
+        'rw',
+        [this.database.tasks, this.database.operations, this.database.imports],
+        async () => {
+          const checkMessage = await this.database.imports.get(validatedEnvelope.messageId);
+          if (checkMessage) {
+            throw new TaskRepositoryError('This task was already imported.', 'DUPLICATE');
+          }
+          const checkTask = await this.database.tasks.get(task.id);
+          if (checkTask) {
+            throw new TaskRepositoryError('This task ID already exists.', 'DUPLICATE');
+          }
+
+          await this.database.tasks.add(task);
+          await this.database.operations.add(operation);
+          await this.database.imports.add(importRecord);
+        },
+      );
+      return {
+        status: 'imported',
+        task,
+        message: 'Task imported successfully to local storage.',
+      };
+    } catch (error) {
+      if (error instanceof TaskRepositoryError) throw error;
+      throw this.wrapDatabaseError(error, 'The imported task could not be saved locally.');
+    }
+  }
+
+  async getImportRecord(messageId: string): Promise<PaperBridgeImportRecord | undefined> {
+    return this.database.imports.get(messageId);
+  }
+
+  async isMessageImported(messageId: string): Promise<boolean> {
+    const record = await this.database.imports.get(messageId);
+    return Boolean(record);
+  }
+
+  async getAllImports(): Promise<PaperBridgeImportRecord[]> {
+    return this.database.imports.toArray();
   }
 
   private async requireActiveTask(id: string): Promise<Task> {

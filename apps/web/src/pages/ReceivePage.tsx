@@ -1,19 +1,20 @@
 import { PageHeader } from '../components/ui/PageHeader';
-import { QRScannerPlaceholder } from '../components/ui/QRScannerPlaceholder';
+import { QRReceiver } from '../components/qr/QRReceiver';
 import { useLanguage } from '../hooks/use-language';
+
 export function ReceivePage() {
   const { t } = useLanguage();
   return (
     <>
       <PageHeader
         title={t.receive}
-        description="One scan. A shared understanding. The PaperBridge receiver is coming in Phase 3."
+        description="One scan. A shared understanding. Receive and import tasks completely offline."
       />
       <section className="max-w-md">
-        <QRScannerPlaceholder />
+        <QRReceiver />
         <p className="mt-4 text-xs leading-relaxed text-muted">
-          This is a layout preview. No camera permission is requested, images cannot be uploaded,
-          and no task is received.
+          PaperBridge decodes and validates tasks locally in your browser. All imported tasks are
+          saved directly to your device's IndexedDB database without sending data over the network.
         </p>
       </section>
     </>

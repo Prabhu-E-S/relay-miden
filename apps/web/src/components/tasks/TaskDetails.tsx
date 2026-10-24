@@ -14,6 +14,7 @@ import {
   TASK_STATUS_SEQUENCE,
   type Task,
   type TaskOperation,
+  type TaskOperationType,
   type TaskStatus,
 } from '@relay-miden/shared';
 import { TaskSummary } from './TaskSummary';
@@ -22,11 +23,12 @@ import { actionLabels, formatDateTime, statusLabels } from '../../lib/task-displ
 import { readableDatabaseError } from '../../db/errors';
 import { taskRepository } from '../../db/task-repository';
 
-const operationLabels = {
+const operationLabels: Record<TaskOperationType, string> = {
   TASK_CREATE: 'Task created',
   TASK_UPDATE: 'Task updated',
   TASK_DELETE: 'Task deleted',
-} as const;
+  TASK_IMPORT: 'Imported via PaperBridge',
+};
 
 export function TaskDetails({ task, operations }: { task: Task; operations: TaskOperation[] }) {
   const navigate = useNavigate();
@@ -192,6 +194,12 @@ export function TaskDetails({ task, operations }: { task: Task; operations: Task
               <dt className="text-muted">Revision</dt>
               <dd className="mt-1 font-medium">{task.revision}</dd>
             </div>
+            {operations.some((op) => op.operationType === 'TASK_IMPORT') && (
+              <div>
+                <dt className="text-muted">Origin</dt>
+                <dd className="mt-1 font-medium text-xs">PaperBridge Transfer</dd>
+              </div>
+            )}
           </dl>
         </section>
         <section className="panel p-5">

@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { CreateTaskInput } from '@relay-miden/shared';
+import { createPaperBridgeEnvelope, type CreateTaskInput, type Task } from '@relay-miden/shared';
 import { RelayMidenDatabase } from './database';
 import { TaskRepository, applyTaskFilters } from './task-repository';
 
@@ -249,5 +249,159 @@ describe('TaskRepository', () => {
     const repaired = await repository.getDeviceId();
     expect(repaired).toMatch(/^[0-9a-f-]{36}$/i);
     expect(await repository.getTaskById(created.id)).toEqual(created);
+  });
+});
+
+describe('PaperBridge Import into IndexedDB', () => {
+  const remoteTask: Task = {
+    id: 'f1111111-2222-4333-8444-555555555555',
+    action: 'REQUEST_VOLUNTEERS',
+    title: 'Sort and pack emergency rations',
+    description: 'Assemble family ration packs for Flood Ward 7.',
+    quantity: 100,
+    unit: 'Packs',
+    location: 'Distribution Center 2',
+    priority: 'urgent',
+    status: 'pending',
+    createdAt: '2026-10-24T10:00:00.000Z',
+    updatedAt: '2026-10-24T10:00:00.000Z',
+    createdBy: 'e1111111-2222-4333-8444-555555555555',
+    revision: 2,
+    deletedAt: null,
+  };
+  const remoteSenderId = 'e2222222-3333-4444-8555-666666666666';
+
+  it('16. new task imports successfully into local database', async () => {
+    const { repository } = createRepository();
+    const { envelope } = await createPaperBridgeEnvelope(remoteTask, remoteSenderId);
+    const result = await repository.importPaperBridgeTask(envelope);
+    expect(result.status).toBe('imported');
+    if (result.status === 'imported') {
+      expect(result.task.id).toBe(remoteTask.id);
+    }
+    const stored = await repository.getTaskById(remoteTask.id);
+    expect(stored).toBeDefined();
+    expect(stored?.title).toBe(remoteTask.title);
+  });
+
+  it('17. original task ID is preserved upon import', async () => {
+    const { repository } = createRepository();
+    const { envelope } = await createPaperBridgeEnvelope(remoteTask, remoteSenderId);
+    const result = await repository.importPaperBridgeTask(envelope);
+    expect(result.task.id).toBe(remoteTask.id);
+    expect(result.task.id).toBe('f1111111-2222-4333-8444-555555555555');
+  });
+
+  it('18. original creator device ID is preserved upon import', async () => {
+    const { repository } = createRepository();
+    const { envelope } = await createPaperBridgeEnvelope(remoteTask, remoteSenderId);
+    const result = await repository.importPaperBridgeTask(envelope);
+    expect(result.task.createdBy).toBe(remoteTask.createdBy);
+    expect(result.task.createdBy).toBe('e1111111-2222-4333-8444-555555555555');
+  });
+
+  it('19. task revision is preserved upon import', async () => {
+    const { repository } = createRepository();
+    const { envelope } = await createPaperBridgeEnvelope(remoteTask, remoteSenderId);
+    const result = await repository.importPaperBridgeTask(envelope);
+    expect(result.task.revision).toBe(2);
+  });
+
+  it('20. duplicate scan of same message does not create another task or error out', async () => {
+    const { repository } = createRepository();
+    const { envelope } = await createPaperBridgeEnvelope(remoteTask, remoteSenderId);
+    const firstResult = await repository.importPaperBridgeTask(envelope);
+    expect(firstResult.status).toBe('imported');
+
+    const secondResult = await repository.importPaperBridgeTask(envelope);
+    expect(secondResult.status).toBe('duplicate');
+    expect(secondResult.message).toContain('already imported');
+
+    const allTasks = await repository.getAllTasks();
+    expect(allTasks).toHaveLength(1);
+  });
+
+  it('21. duplicate scan does not create another import operation', async () => {
+    const { repository } = createRepository();
+    const { envelope } = await createPaperBridgeEnvelope(remoteTask, remoteSenderId);
+    await repository.importPaperBridgeTask(envelope);
+    await repository.importPaperBridgeTask(envelope);
+
+    const operations = await repository.getTaskOperations(remoteTask.id);
+    expect(operations).toHaveLength(1);
+    expect(operations[0]?.operationType).toBe('TASK_IMPORT');
+    expect(operations[0]?.messageId).toBe(envelope.messageId);
+  });
+
+  it('22. conflicting revisions do not overwrite local data', async () => {
+    const { repository } = createRepository();
+    // Import initial revision 2
+    const { envelope: env1 } = await createPaperBridgeEnvelope(remoteTask, remoteSenderId);
+    await repository.importPaperBridgeTask(env1);
+
+    // Now try to import an incoming envelope with revision 1 or revision 3
+    const conflictTask: Task = {
+      ...remoteTask,
+      title: 'Modified title from another source',
+      revision: 3,
+    };
+    const { envelope: envConflict } = await createPaperBridgeEnvelope(conflictTask, remoteSenderId);
+    const conflictResult = await repository.importPaperBridgeTask(envConflict);
+
+    expect(conflictResult.status).toBe('conflict');
+    expect(conflictResult.message).toContain('Conflict detected');
+
+    // Local task is still at revision 2 with original title
+    const current = await repository.getTaskById(remoteTask.id);
+    expect(current?.revision).toBe(2);
+    expect(current?.title).toBe(remoteTask.title);
+  });
+
+  it('23. deleted tasks are not silently restored upon import', async () => {
+    const { repository } = createRepository();
+    const { envelope } = await createPaperBridgeEnvelope(remoteTask, remoteSenderId);
+    await repository.importPaperBridgeTask(envelope);
+
+    // Soft delete the task locally
+    await repository.deleteTask(remoteTask.id);
+    expect(await repository.getTaskById(remoteTask.id)).toBeUndefined();
+
+    // Re-import attempt
+    const newEnvelope = await createPaperBridgeEnvelope(remoteTask, remoteSenderId);
+    const result = await repository.importPaperBridgeTask(newEnvelope.envelope);
+    expect(result.status).toBe('conflict');
+    expect(result.message).toContain('deleted locally');
+
+    // Should still be deleted
+    expect(await repository.getTaskById(remoteTask.id)).toBeUndefined();
+  });
+
+  it('24. import transaction failures do not leave partial records', async () => {
+    const { repository } = createRepository();
+    const { envelope } = await createPaperBridgeEnvelope(remoteTask, remoteSenderId);
+
+    // Corrupt checksum intentionally
+    const corruptedEnvelope = {
+      ...envelope,
+      checksum: '0000000000000000000000000000000000000000000000000000000000000000',
+    };
+
+    await expect(repository.importPaperBridgeTask(corruptedEnvelope)).rejects.toThrow();
+    expect(await repository.getTaskById(remoteTask.id)).toBeUndefined();
+    expect(await repository.getAllImports()).toHaveLength(0);
+  });
+
+  it('29. dashboard statistics update immediately after import', async () => {
+    const { repository } = createRepository();
+    const beforeStats = await repository.getTaskStatistics();
+    expect(beforeStats.active).toBe(0);
+
+    const { envelope } = await createPaperBridgeEnvelope(remoteTask, remoteSenderId);
+    await repository.importPaperBridgeTask(envelope);
+
+    const afterStats = await repository.getTaskStatistics();
+    expect(afterStats.active).toBe(1);
+    expect(afterStats.inProgress).toBe(0);
+    expect(afterStats.completed).toBe(0);
   });
 });

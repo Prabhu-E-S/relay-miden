@@ -157,14 +157,18 @@ test('task details enforce transitions, edit data, reopen, and soft-delete', asy
   await expect(page.getByRole('heading', { name: 'Task not found' })).toBeVisible();
 });
 
-test('QR features remain placeholders while using local task summaries', async ({ page }) => {
+test('PaperBridge QR features generate scannable codes and enable camera/upload receiving', async ({
+  page,
+}) => {
   const id = await createTask(page, { title: 'Prepare supply packs' });
   await page.goto(`/send?task=${id}`);
   await expect(page.getByRole('heading', { name: 'Prepare supply packs' })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Download QR/ })).toBeDisabled();
+  await expect(page.getByRole('link', { name: 'Download QR' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Copy Payload' })).toBeVisible();
+  await expect(page.getByAltText(/PaperBridge QR code for task/)).toBeVisible();
   await page.goto('/receive');
-  await expect(page.getByRole('button', { name: 'Use camera' })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Upload image' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Use camera' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Upload image' })).toBeEnabled();
 });
 
 test('mobile navigation, device identity, and all three languages remain usable', async ({
@@ -217,4 +221,87 @@ test('brand tokens and unfilled indicators still match the approved design', asy
     );
   expect(fills.length).toBeGreaterThan(8);
   expect(fills.every((color) => color === 'rgba(0, 0, 0, 0)')).toBe(true);
+});
+
+test('end-to-end multi-device PaperBridge transfer via QR image file upload', async ({
+  browser,
+}) => {
+  // Device A (Sender)
+  const contextA = await browser.newContext();
+  const pageA = await contextA.newPage();
+  const id = await createTask(pageA, {
+    title: 'Emergency Medical Supplies',
+    quantity: '50',
+    unit: 'Kits',
+    location: 'Sector 4 Field Hospital',
+    priority: 'Urgent',
+    description: 'Trauma kits and saline drips needed immediately.',
+  });
+  await pageA.goto(`/send?task=${id}`);
+  const qrImg = pageA.getByAltText(/PaperBridge QR code for task/);
+  await expect(qrImg).toBeVisible();
+  const dataUrl = await qrImg.getAttribute('src');
+  expect(dataUrl).toMatch(/^data:image\/png;base64,/);
+
+  // Convert base64 data URL to buffer for upload simulation
+  const base64Data = dataUrl!.replace(/^data:image\/png;base64,/, '');
+  const imageBuffer = Buffer.from(base64Data, 'base64');
+
+  // Device B (Receiver) with completely separate storage and IndexedDB
+  const contextB = await browser.newContext();
+  const pageB = await contextB.newPage();
+  await pageB.goto('/receive');
+  await expect(pageB.getByText('PaperBridge Offline Receiver')).toBeVisible();
+
+  // Upload the QR image
+  const fileChooserPromise = pageB.waitForEvent('filechooser');
+  await pageB.getByRole('button', { name: 'Upload image' }).click();
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles({
+    name: 'transfer-qr.png',
+    mimeType: 'image/png',
+    buffer: imageBuffer,
+  });
+
+  // Verify decoded task preview
+  await expect(pageB.getByRole('heading', { name: 'QR Decoded Successfully' })).toBeVisible();
+  await expect(pageB.getByRole('heading', { name: 'Emergency Medical Supplies' })).toBeVisible();
+  await expect(pageB.getByText('Sector 4 Field Hospital')).toBeVisible();
+  await expect(pageB.getByText('50 Kits')).toBeVisible();
+  await expect(pageB.getByText('Urgent')).toBeVisible();
+
+  // Confirm import
+  await pageB.getByRole('button', { name: 'Import Task' }).click();
+  await expect(pageB.getByRole('heading', { name: 'Task Imported Successfully' })).toBeVisible();
+
+  // Verify task appears on Tasks page
+  await pageB.goto('/tasks');
+  await expect(pageB.getByRole('link', { name: /Emergency Medical Supplies/ })).toBeVisible();
+
+  // Refresh and verify persistence
+  await pageB.reload();
+  await expect(pageB.getByRole('link', { name: /Emergency Medical Supplies/ })).toBeVisible();
+
+  // Duplicate scan test: upload the same QR image again
+  await pageB.goto('/receive');
+  const duplicateChooserPromise = pageB.waitForEvent('filechooser');
+  await pageB.getByRole('button', { name: 'Upload image' }).click();
+  const duplicateChooser = await duplicateChooserPromise;
+  await duplicateChooser.setFiles({
+    name: 'transfer-qr.png',
+    mimeType: 'image/png',
+    buffer: imageBuffer,
+  });
+
+  // Confirm duplicate import
+  await expect(pageB.getByRole('heading', { name: 'QR Decoded Successfully' })).toBeVisible();
+  await pageB.getByRole('button', { name: 'Import Task' }).click();
+  await expect(pageB.getByRole('heading', { name: 'Task Already Present' })).toBeVisible();
+
+  // Verify task count is still 1
+  await pageB.goto('/tasks');
+  await expect(pageB.getByText(/Showing 1 of 1 local task/)).toBeVisible();
+
+  await contextA.close();
+  await contextB.close();
 });
