@@ -1,6 +1,7 @@
 import {
   TaskSchema,
   TaskOperationSchema,
+  generateUuid,
   taskStateHash,
   type Task,
   type TaskOperation,
@@ -204,7 +205,7 @@ export async function submitLocalOperation(
   try {
     const payload = await buildLanOperationPayload(operationId, database, sync);
     const deviceId = await tasks.getDeviceId();
-    const requestId = crypto.randomUUID();
+    const requestId = generateUuid();
 
     const submitEnvelope: LanOperationSubmit = {
       protocolVersion: LAN_PROTOCOL_VERSION,

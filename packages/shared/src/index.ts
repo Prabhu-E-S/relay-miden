@@ -1,4 +1,5 @@
 export * from './tasks.js';
+export * from './uuid.js';
 export * from './paperbridge.js';
 export * from './paperbridge-v2.js';
 export * from './sync.js';

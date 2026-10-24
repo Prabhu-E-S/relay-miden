@@ -5,6 +5,8 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { useLanguage } from '../hooks/use-language';
 import { languages } from '../lib/languages';
 import { taskRepository } from '../db/task-repository';
+import { PwaSection } from '../components/pwa/PwaSection';
+
 export function SettingsPage() {
   const { dict, language, setLanguage } = useLanguage();
   const [deviceId, setDeviceId] = useState<string>();
@@ -77,6 +79,7 @@ export function SettingsPage() {
             {deviceId ?? 'Loading…'}
           </p>
         </section>
+        <PwaSection />
         <Link
           to="/connections"
           className="panel mt-4 flex min-h-16 items-center gap-3 p-4 text-sm font-medium"
@@ -86,8 +89,8 @@ export function SettingsPage() {
           <ArrowUpRight size={17} className="ml-auto" />
         </Link>
         <div className="mt-6 text-xs leading-relaxed text-muted">
-          <p className="font-medium text-brand">Relay Miden · Phase 4</p>
-          <p className="mt-2">Works Anyway · Offline Multilingual Communication</p>
+          <p className="font-medium text-brand">Relay Miden · Phase 8</p>
+          <p className="mt-2">Works Anyway · Offline PWA & Secure LAN Operation</p>
           <p>{dict.settings.offlineFooter}</p>
         </div>
       </div>

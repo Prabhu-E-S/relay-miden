@@ -179,13 +179,14 @@ export class LanConnectionManager {
   }
 
   validateUrl(url: string): void {
+    let parsed: URL;
     try {
-      const parsed = new URL(url);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        throw new Error('LAN URL must use http: or https:');
-      }
+      parsed = new URL(url);
     } catch {
       throw new Error(`Invalid LAN server URL: ${url}. Example: http://192.168.1.10:3001`);
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`LAN URL must use http: or https:, received ${parsed.protocol}`);
     }
   }
 

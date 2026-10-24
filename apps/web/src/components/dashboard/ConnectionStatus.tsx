@@ -1,7 +1,9 @@
-import { WifiOff, Network, QrCode, Inbox } from 'lucide-react';
+import { WifiOff, Network, QrCode, Inbox, Smartphone } from 'lucide-react';
 import { useLanSync } from '../../hooks/use-lan-sync';
+import { usePwa } from '../../hooks/use-pwa';
 
 export function ConnectionStatus() {
+  const { offlineReady, isStandalone } = usePwa();
   const {
     status,
     lastError,
@@ -148,6 +150,27 @@ export function ConnectionStatus() {
           </dt>
           <dd className="status-label text-right text-[11px] text-brand">
             Ready<span className="block text-[10px] text-muted">PaperBridge active</span>
+          </dd>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <dt className="flex items-center gap-2.5 text-xs font-medium">
+            <Smartphone size={19} aria-hidden="true" />
+            PWA Shell
+          </dt>
+          <dd className="status-label text-right text-[11px] text-brand">
+            {offlineReady ? (
+              <>
+                Ready offline
+                <span className="block text-[10px] text-muted">
+                  {isStandalone ? 'Standalone installed' : 'Cached in browser'}
+                </span>
+              </>
+            ) : (
+              <>
+                Caching…
+                <span className="block text-[10px] text-muted">Installing shell</span>
+              </>
+            )}
           </dd>
         </div>
       </dl>

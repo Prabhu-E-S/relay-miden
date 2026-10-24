@@ -9,6 +9,7 @@ import {
   UpdateTaskInputSchema,
   verifyEnvelopeChecksum,
   taskStateHash,
+  generateUuid,
   type CreateTaskInput,
   type PaperBridgeEnvelope,
   type Task,
@@ -111,8 +112,8 @@ export class TaskRepository {
     dependencies: TaskRepositoryDependencies = {},
   ) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
-    this.taskId = dependencies.taskId ?? (() => crypto.randomUUID());
-    this.operationId = dependencies.operationId ?? (() => crypto.randomUUID());
+    this.taskId = dependencies.taskId ?? generateUuid;
+    this.operationId = dependencies.operationId ?? generateUuid;
   }
 
   addOperationListener(listener: TaskOperationListener): () => void {
@@ -150,7 +151,7 @@ export class TaskRepository {
         const parsed = DeviceIdSchema.safeParse(existing?.value);
         if (parsed.success) return parsed.data;
 
-        const deviceId = crypto.randomUUID();
+        const deviceId = generateUuid();
         await this.database.settings.put({
           key: DEVICE_ID_KEY,
           value: deviceId,

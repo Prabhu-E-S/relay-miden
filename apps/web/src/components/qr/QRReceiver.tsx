@@ -9,7 +9,7 @@ import {
   SquareCheck,
   XCircle,
 } from 'lucide-react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import {
   decodeAnyPaperBridgeMessage,
   PaperBridgeError,
@@ -93,15 +93,25 @@ export function QRReceiver() {
         return;
       }
 
-      const html5QrCode = new Html5Qrcode('paperbridge-camera-viewport');
+      const html5QrCode = new Html5Qrcode('paperbridge-camera-viewport', {
+        verbose: false,
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        useBarCodeDetectorIfSupported: true,
+      });
       scannerRef.current = html5QrCode;
 
       await html5QrCode.start(
         { facingMode: 'environment' },
         {
-          fps: 10,
-          qrbox: { width: 240, height: 240 },
+          // Do not crop to a small decoder box. PaperBridge carries a signed
+          // task envelope, which can produce a denser QR than a URL.
+          fps: 12,
           aspectRatio: 1.0,
+          disableFlip: true,
+          videoConstraints: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
         },
         async (decodedText) => {
           stopCameraScanner();

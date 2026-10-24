@@ -7,12 +7,21 @@ type DatabaseState = 'opening' | 'ready' | 'error';
 export function DatabaseProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DatabaseState>('opening');
   const [attempt, setAttempt] = useState(0);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     taskRepository.open().then(
-      () => active && setState('ready'),
-      () => active && setState('error'),
+      () => {
+        if (!active) return;
+        setErrorMessage(null);
+        setState('ready');
+      },
+      (error: unknown) => {
+        if (!active) return;
+        setErrorMessage(error instanceof Error ? error.message : null);
+        setState('error');
+      },
     );
     return () => {
       active = false;
@@ -41,9 +50,11 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
             Relay Miden could not open IndexedDB. Existing data was not cleared. Check browser
             storage permissions, then try again.
           </p>
+          {errorMessage ? <p className="mt-3 text-xs text-muted">Details: {errorMessage}</p> : null}
           <button
             className="button-primary mt-5"
             onClick={() => {
+              setErrorMessage(null);
               setState('opening');
               setAttempt((value) => value + 1);
             }}

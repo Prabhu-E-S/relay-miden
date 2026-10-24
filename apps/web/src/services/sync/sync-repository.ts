@@ -8,6 +8,7 @@ import {
   classifyIncomingOperation,
   completeTaskChanges,
   createPaperBridgeV2Envelope,
+  generateUuid,
   taskChanges,
   taskStateHash,
   verifyEnvelopeChecksum,
@@ -446,7 +447,7 @@ export class SyncRepository {
       .reverse()
       .find((op) => op.revision === current.revision);
     const operation = TaskOperationSchema.parse({
-      operationId: crypto.randomUUID(),
+      operationId: generateUuid(),
       taskId: current.id,
       actorId,
       operationType: 'TASK_RESOLVE',

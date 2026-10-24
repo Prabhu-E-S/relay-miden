@@ -9,6 +9,7 @@ import {
   Inbox,
   AlertTriangle,
   RotateCcw,
+  Smartphone,
 } from 'lucide-react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { ConnectionStatus } from '../components/dashboard/ConnectionStatus';
@@ -328,6 +329,11 @@ export function ConnectionsPage() {
                   icon: QrCode,
                   title: 'QR & LAN transport interoperability',
                   text: 'PaperBridge QR transfers work independently. Remote QR imports preserve provenance without false outbox re-publishing.',
+                },
+                {
+                  icon: Smartphone,
+                  title: 'Secure LAN access & camera scanning',
+                  text: 'Mobile browsers require HTTPS for live camera scanning and service worker registration. Use locally trusted TLS certificates to access both frontend and LAN sync securely.',
                 },
               ].map(({ icon: Icon, title, text }) => (
                 <div key={title} className="flex gap-3">
