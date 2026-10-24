@@ -9,7 +9,7 @@ Only the current explicitly authorized phase may be implemented. Later phases be
 | 3     | PaperBridge QR protocol: versioned envelope, encoding/decoding, validation, duplicate detection | Implemented and verified |
 | 4     | Multilingual communication: English, Malayalam, Tamil templates and localized task workflows    | Implemented and verified |
 | 5     | Two-way QR task lifecycle: acknowledgments, status transfer, conflict semantics                 | Implemented and verified |
-| 6     | Local Wi-Fi communication: explicit local connectivity and LAN transport                        | Planned                  |
+| 6     | Local Wi-Fi communication: explicit local connectivity and LAN transport                        | Implemented and verified |
 | 7     | Offline queue and synchronization: durable retries, reconciliation, idempotency                 | Planned                  |
 | 8     | PWA and mobile readiness: manifest, caching, installability, offline refresh                    | Planned                  |
 | 9     | Final UI and mission control: integrated operational states, polish and accessibility           | Planned                  |
@@ -34,3 +34,7 @@ Verify bundled English (`en`), Malayalam (`ml`), and Tamil (`ta`) dictionaries w
 ## Phase 5 verification gate
 
 Verify v1 task QR regression plus v2 update and acknowledgment encoding/decoding, explicit state-hash and operation ancestry, duplicate and stale classification, missing-parent handling, atomic incoming updates, persistent conflict records, user-selected resolution operations, two-device convergence, outgoing ACK matching, browser QR round trips, multilingual canonical data preservation, migration from Dexie version 2, strict TypeScript, lint, unit tests, responsive browser tests, and production build. Phase 6 LAN transport and Phase 7 automatic synchronization remain planned.
+
+## Phase 6 verification gate
+
+Verify local Express and Socket.IO server (`apps/server`) with persistent SQLite storage (`node:sqlite`) in WAL mode, monotonic server sequence, device registration with optional host session token, pure causal synchronization engine reuse, initial and incremental catch-up synchronization batches, real-time operation submission, atomic SQLite commits before acknowledgment, duplicate operation idempotence, concurrent branch conflict detection and resolution, real-time broadcast to peers, client LAN synchronization service (`apps/web/src/services/lan/`), manual "Sync Now" recovery, reactive connection status on the dashboard and Connections page without horizontal overflow at any viewport (320px–1440px), 113 Vitest tests (including 12 server integration tests, 7 client LAN tests, and all Phase 2–5 regressions), 19 Playwright tests, zero ESLint warnings, Prettier formatting, and clean production builds. Phase 7 durable background retry queue and replay remain planned.

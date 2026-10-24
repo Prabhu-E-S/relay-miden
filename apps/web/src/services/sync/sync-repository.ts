@@ -14,6 +14,7 @@ import {
   type PaperBridgeV2Envelope,
   type Task,
   type TaskOperation,
+  type TaskUpdatePayload,
   type SyncClassification,
 } from '@relay-miden/shared';
 import { canonicalJsonStringify } from '@relay-miden/shared';
@@ -46,16 +47,7 @@ export class SyncRepository {
     );
   }
 
-  async createOutgoingTaskUpdate(taskId: string, operationId: string) {
-    const existing = await this.database.outgoing.where('operationId').equals(operationId).first();
-    if (existing && JSON.parse(existing.rawJson).messageType === 'TASK_UPDATE') {
-      const parsed = PaperBridgeV2EnvelopeSchema.parse(JSON.parse(existing.rawJson));
-      return {
-        envelope: parsed,
-        rawJson: existing.rawJson,
-        byteSize: new TextEncoder().encode(existing.rawJson).length,
-      };
-    }
+  async buildTaskUpdatePayload(taskId: string, operationId: string): Promise<TaskUpdatePayload> {
     const operation = TaskOperationSchema.parse(await this.database.operations.get(operationId));
     if (
       operation.taskId !== taskId ||
@@ -77,7 +69,7 @@ export class SyncRepository {
     if (!parent || parent.revision !== operation.revision - 1) {
       throw new Error('The parent task history is unavailable. Export the task snapshot first.');
     }
-    const payload = TaskUpdatePayloadSchema.parse({
+    return TaskUpdatePayloadSchema.parse({
       taskId,
       operationId: operation.operationId,
       originDeviceId: ownId,
@@ -105,6 +97,20 @@ export class SyncRepository {
         ? { reopen: true }
         : {}),
     });
+  }
+
+  async createOutgoingTaskUpdate(taskId: string, operationId: string) {
+    const existing = await this.database.outgoing.where('operationId').equals(operationId).first();
+    if (existing && JSON.parse(existing.rawJson).messageType === 'TASK_UPDATE') {
+      const parsed = PaperBridgeV2EnvelopeSchema.parse(JSON.parse(existing.rawJson));
+      return {
+        envelope: parsed,
+        rawJson: existing.rawJson,
+        byteSize: new TextEncoder().encode(existing.rawJson).length,
+      };
+    }
+    const payload = await this.buildTaskUpdatePayload(taskId, operationId);
+    const ownId = await this.tasks.getDeviceId();
     const encoded = await createPaperBridgeV2Envelope(
       { messageType: 'TASK_UPDATE', payload },
       ownId,
@@ -132,16 +138,12 @@ export class SyncRepository {
     return encoded;
   }
 
-  async applyIncomingUpdate(untrusted: PaperBridgeV2Envelope): Promise<IncomingUpdateResult> {
-    const parsed = PaperBridgeV2EnvelopeSchema.parse(untrusted);
-    if (parsed.messageType !== 'TASK_UPDATE')
-      throw new Error('This QR does not contain a task update.');
-    if (!(await verifyEnvelopeChecksum(parsed)))
-      throw new Error('QR checksum verification failed.');
-    const incoming = parsed as UpdateEnvelope;
-    if (incoming.senderId !== incoming.payload.originDeviceId)
-      throw new Error('Update sender and origin do not match.');
-    const task = await this.tasks.getTaskById(incoming.payload.taskId, true);
+  async applyIncomingTaskUpdatePayload(
+    payload: TaskUpdatePayload,
+    senderId: string = payload.originDeviceId,
+    messageId: string = `lan-${payload.operationId}`,
+  ): Promise<IncomingUpdateResult> {
+    const task = await this.tasks.getTaskById(payload.taskId, true);
     const operations = task ? await this.tasks.getTaskOperations(task.id) : [];
     const hashes = await Promise.all(
       operations.map((operation) => taskStateHash(operation.payload)),
@@ -155,27 +157,25 @@ export class SyncRepository {
             ancestorStateHashes: hashes,
           }
         : null,
-      incoming.payload,
+      payload,
     );
     if (classification === 'ALREADY_APPLIED' && task) {
-      const prior = operations.find(
-        (operation) => operation.operationId === incoming.payload.operationId,
-      );
-      if (!prior || (await taskStateHash(prior.payload)) !== incoming.payload.resultStateHash) {
+      const prior = operations.find((operation) => operation.operationId === payload.operationId);
+      if (!prior || (await taskStateHash(prior.payload)) !== payload.resultStateHash) {
         return { status: 'INVALID', message: 'An operation with this ID has different content.' };
       }
-      return { status: 'ALREADY_APPLIED', task, messageId: incoming.messageId };
+      return { status: 'ALREADY_APPLIED', task, messageId };
     }
     if (classification === 'CONFLICT' && task) {
-      const baseIndex = hashes.indexOf(incoming.payload.baseStateHash);
+      const baseIndex = hashes.indexOf(payload.baseStateHash);
       if (baseIndex < 0)
         return {
           status: 'MISSING_PARENT',
           message: 'The incoming branch base is missing. Transfer its earlier update first.',
         };
       try {
-        const proposed = applyTaskChanges(operations[baseIndex]!.payload, incoming.payload);
-        if ((await taskStateHash(proposed)) !== incoming.payload.resultStateHash) {
+        const proposed = applyTaskChanges(operations[baseIndex]!.payload, payload);
+        if ((await taskStateHash(proposed)) !== payload.resultStateHash) {
           return {
             status: 'INVALID',
             message: 'The incoming branch does not match its declared state hash.',
@@ -185,12 +185,12 @@ export class SyncRepository {
         return { status: 'INVALID', message: 'The incoming branch contains invalid task changes.' };
       }
       const conflict: SyncConflictRecord = {
-        id: incoming.payload.operationId,
+        id: payload.operationId,
         taskId: task.id,
-        incomingOperationId: incoming.payload.operationId,
-        incomingMessageId: incoming.messageId,
+        incomingOperationId: payload.operationId,
+        incomingMessageId: messageId,
         localTask: task,
-        incoming: incoming.payload,
+        incoming: payload,
         createdAt: new Date().toISOString(),
       };
       await this.database.transaction('rw', this.database.conflicts, async () => {
@@ -215,31 +215,31 @@ export class SyncRepository {
           : 'INVALID';
       return { status, message: messages[classification] };
     }
-    if (task.deletedAt && incoming.payload.changes.deletedAt !== task.deletedAt) {
+    if (task.deletedAt && payload.changes.deletedAt !== task.deletedAt) {
       const conflict: SyncConflictRecord = {
-        id: incoming.payload.operationId,
+        id: payload.operationId,
         taskId: task.id,
-        incomingOperationId: incoming.payload.operationId,
-        incomingMessageId: incoming.messageId,
+        incomingOperationId: payload.operationId,
+        incomingMessageId: messageId,
         localTask: task,
-        incoming: incoming.payload,
+        incoming: payload,
         createdAt: new Date().toISOString(),
       };
       await this.database.conflicts.put(conflict);
       return { status: 'CONFLICT', conflict };
     }
-    const next = applyTaskChanges(task, incoming.payload);
-    if ((await taskStateHash(next)) !== incoming.payload.resultStateHash) {
+    const next = applyTaskChanges(task, payload);
+    if ((await taskStateHash(next)) !== payload.resultStateHash) {
       return {
         status: 'INVALID',
         message: 'Update result does not match its declared state hash.',
       };
     }
     const operation = TaskOperationSchema.parse({
-      operationId: incoming.payload.operationId,
+      operationId: payload.operationId,
       taskId: task.id,
-      actorId: incoming.payload.originDeviceId,
-      operationType: incoming.payload.resolution
+      actorId: payload.originDeviceId,
+      operationType: payload.resolution
         ? 'TASK_RESOLVE'
         : next.deletedAt
           ? 'TASK_DELETE'
@@ -247,15 +247,15 @@ export class SyncRepository {
       timestamp: next.updatedAt,
       revision: next.revision,
       parentRevision: task.revision,
-      parentOperationId: incoming.payload.parentOperationId,
-      ...(incoming.payload.resolution
+      parentOperationId: payload.parentOperationId,
+      ...(payload.resolution
         ? {
-            mergedOperationId: incoming.payload.resolution.mergedOperationId,
-            mergedStateHash: incoming.payload.resolution.mergedStateHash,
+            mergedOperationId: payload.resolution.mergedOperationId,
+            mergedStateHash: payload.resolution.mergedStateHash,
           }
         : {}),
       payload: next,
-      messageId: incoming.messageId,
+      messageId,
     });
     const inserted = await this.database.transaction(
       'rw',
@@ -263,19 +263,17 @@ export class SyncRepository {
       async () => {
         const current = await this.database.tasks.get(task.id);
         if (canonicalJsonStringify(current) !== canonicalJsonStringify(task)) {
-          throw new Error(
-            'The local task changed while this QR was being processed. Scan it again.',
-          );
+          throw new Error('The local task changed while this update was being processed.');
         }
         if (await this.database.operations.get(operation.operationId)) return false;
         await this.database.tasks.put(next);
         await this.database.operations.add(operation);
         await this.database.imports.put({
-          messageId: incoming.messageId,
+          messageId,
           taskId: task.id,
-          senderId: incoming.senderId,
+          senderId,
           importedAt: new Date().toISOString(),
-          rawJson: canonicalJsonStringify(incoming),
+          rawJson: canonicalJsonStringify(payload),
         });
         return true;
       },
@@ -283,8 +281,24 @@ export class SyncRepository {
     return {
       status: inserted ? 'APPLIED' : 'ALREADY_APPLIED',
       task: inserted ? next : (await this.tasks.getTaskById(task.id, true))!,
-      messageId: incoming.messageId,
+      messageId,
     };
+  }
+
+  async applyIncomingUpdate(untrusted: PaperBridgeV2Envelope): Promise<IncomingUpdateResult> {
+    const parsed = PaperBridgeV2EnvelopeSchema.parse(untrusted);
+    if (parsed.messageType !== 'TASK_UPDATE')
+      throw new Error('This QR does not contain a task update.');
+    if (!(await verifyEnvelopeChecksum(parsed)))
+      throw new Error('QR checksum verification failed.');
+    const incoming = parsed as UpdateEnvelope;
+    if (incoming.senderId !== incoming.payload.originDeviceId)
+      throw new Error('Update sender and origin do not match.');
+    return this.applyIncomingTaskUpdatePayload(
+      incoming.payload,
+      incoming.senderId,
+      incoming.messageId,
+    );
   }
 
   async createAcknowledgment(incoming: UpdateEnvelope, result: 'APPLIED' | 'ALREADY_APPLIED') {
@@ -460,6 +474,7 @@ export class SyncRepository {
         });
       },
     );
+    this.tasks.notifyOperation(operation);
     return next;
   }
 }

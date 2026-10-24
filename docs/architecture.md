@@ -1,99 +1,94 @@
 # Relay Miden architecture
 
-## Phase 5 boundary
+## Phase 6 boundary
 
-Relay Miden is an npm-workspaces monorepo with an offline-first React interface, a minimal Express health process, and a shared TypeScript package with Zod validation schemas. Phase 4 added offline multilingual communication: canonical structured task instructions are stored and transferred unchanged, then rendered through bundled English, Malayalam, and Tamil templates on each device. Phase 5 adds PaperBridge v2 update and acknowledgment envelopes while retaining v1 task creation/import. All translation, QR, and database work occurs inside the browser without cloud APIs or runtime network requests.
+Relay Miden is an npm-workspaces monorepo with an offline-first React interface, a local Express & Socket.IO synchronization server with SQLite persistence, and a shared TypeScript package with Zod validation schemas. Phase 4 added offline multilingual communication with English, Malayalam, and Tamil templates. Phase 5 established bidirectional PaperBridge v2 updates, causal tracking, acknowledgments, and conflict resolution. Phase 6 implements a local-network synchronization engine allowing multiple devices on the same Wi-Fi or hotspot to exchange task operations in real time without public internet access.
 
 ## Frontend
 
-`apps/web` uses React, Vite, strict TypeScript, Tailwind's Vite plugin, declarative React Router, Lucide icons, Dexie.js, and `dexie-react-hooks`. `App.tsx` composes providers (`DatabaseProvider`, `LanguageProvider`) and routes. `AppShell` owns desktop/mobile navigation, route focus, and the content region.
+`apps/web` uses React, Vite, strict TypeScript, Tailwind's Vite plugin, declarative React Router, Lucide icons, Dexie.js, `dexie-react-hooks`, and `socket.io-client`. `App.tsx` composes providers (`DatabaseProvider`, `LanguageProvider`) and routes. `AppShell` owns desktop/mobile navigation, route focus, and the content region.
 
 - `db/database.ts`: Defines `RelayMidenDatabase` with indexed tables: `tasks`, `operations`, `settings`, `imports`, `outgoing`, `acknowledgments`, and `conflicts` (version 3 schema; previous records remain intact).
-- `db/task-repository.ts`: Encapsulates all transactional CRUD, validation, revision increments, operation history generation, and atomic `importPaperBridgeTask` ingestion.
-- `services/paperbridge/`: Dedicated service layer housing `encodeTaskForQR`, `decodePaperBridgeMessage`, `computeEnvelopeChecksum`, `verifyEnvelopeChecksum`, `generateQRCodeDataUrl`, and `scanQRCodeFromImageFile`.
-- `services/sync/sync-repository.ts`: Browser persistence adapter for v2 outgoing updates, incoming classification/application, ACK matching, and conflict resolution. It uses atomic Dexie transactions for task/operation/import writes and conflict resolution.
-- `components/qr/QRDisplay.tsx`: Renders real scannable QR codes, PNG download buttons, payload copying, and payload size metrics.
-- `components/qr/QRReceiver.tsx`: Multi-mode offline receiver with user-activated camera scanning (`html5-qrcode`), local client-side image file decoding (`jsQR`), visual pre-import task review, and atomic import execution.
-- `components/layout/DatabaseProvider.tsx`: Initializes the database on application startup, managing loading and error fallback states gracefully.
-- `i18n/`: Bundled dictionaries, language-specific sentence templates, and safe structured-task display formatters. `LanguageProvider` persists the selected interface language locally and immediately re-renders structured instructions without changing stored task data.
-- Pages assemble reusable layout, dashboard, task, and UI components. The dashboard aggregates live statistics and recent tasks directly from IndexedDB via `useLiveQuery`.
-- The route map is `/`, `/create`, `/tasks`, `/tasks/:id`, `/send`, `/receive`, `/connections`, and `/settings`, with fallback views.
-- Status transitions follow strict lifecycle progression: pending -> acknowledged -> in_progress -> completed, with an explicit reopen flow.
-- Soft-deleted tasks are flagged with `deletedAt` and excluded from normal listings while preserving operation history and preventing accidental resurrection via PaperBridge import.
+- `db/task-repository.ts`: Encapsulates all transactional CRUD, validation, revision increments, operation history generation, atomic `importPaperBridgeTask` ingestion, and operation listener subscription.
+- `services/paperbridge/`: Dedicated service layer housing QR encoding, decoding, checksumming, and client-side image decoding.
+- `services/sync/sync-repository.ts`: Browser persistence adapter for v2 outgoing updates, incoming classification/application, ACK matching, conflict resolution, and pure task update payload generation.
+- `services/lan/`: Dedicated LAN synchronization service:
+  - `protocol.ts`: Re-exports typed schemas, constants, and envelopes.
+  - `connection.ts`: Manages Socket.IO lifecycle, URL/token persistence, device registration, and reactive connection state machine.
+  - `sync.ts`: Builds operations, applies incoming `TASK_CREATE` and `TASK_UPDATE` payloads, submits local operations, tracks server cursors, and requests initial/manual synchronization.
+  - `client.ts`: High-level singleton wiring reactive Socket.IO broadcasts and task repository operation listeners.
+- `hooks/use-lan-sync.ts`: Reactive hook exposing connection state, server address, connect/disconnect actions, and manual sync controls.
+- `components/dashboard/ConnectionStatus.tsx`: Displays live local network synchronization status (Connected / Connecting / Syncing / Disconnected / Error).
+- `pages/ConnectionsPage.tsx`: Manages host address configuration, session tokens, connect/disconnect actions, and manual "Sync Now" triggers without horizontal overflow across all viewports.
+- `components/qr/`: Multi-mode offline QR generation, display, and scanning.
+- `i18n/`: Bundled dictionaries and language-specific sentence templates for English, Malayalam, and Tamil.
 
-DM Sans is bundled locally with Fontsource; Malayalam and Tamil use available system fonts. No runtime CDN, analytics, paid API, external images, or cloud dependency is required.
+## Backend server and SQLite persistence
 
-## Backend foundation
+`apps/server` hosts the local LAN coordinator:
 
-`apps/server/src/app.ts` exports the Express app for tests; `src/index.ts` validates `PORT`, binds to `HOST`, starts the process, and closes it on termination signals. `GET /health` returns `{ "status": "ok", "service": "relay-miden-server", "phase": 2 }`, with no-store caching. There are no task endpoints, fake API responses, authentication, external databases, or network discovery. The UI makes no API calls; task management and QR transfer are completely backend-independent.
+- `src/app.ts`: Creates Express, HTTP server, and Socket.IO instances with dependency injection, configurable host binding, and CORS. `GET /health` returns health status.
+- `src/db/`:
+  - `connection.ts`: Native Node 24 SQLite connection (`node:sqlite` `DatabaseSync`) with atomic transactions, `foreign_keys = ON`, and `WAL` journal mode.
+  - `schema.ts`: Versioned migrations initializing `server_metadata`, `devices`, `tasks`, `operations`, and `conflicts`.
+- `src/repositories/`:
+  - `deviceRepository.ts`: Persists device registrations and `last_seen_at` timestamps.
+  - `taskRepository.ts`: Persists canonical task projections with revision and state hash.
+  - `operationRepository.ts`: Append-only operation log with strictly monotonic `sequence INTEGER PRIMARY KEY AUTOINCREMENT`.
+  - `conflictRepository.ts`: Records concurrent branch conflicts and resolutions.
+- `src/services/syncService.ts`: Core server synchronization engine validating canonical payloads, detecting idempotence, verifying causal ancestry, applying state transitions, and generating bounded sync batches.
+- `src/sockets/registerHandlers.ts`: Implements Socket.IO protocol handlers for `device:register`, `sync:request`, `operation:submit`, and selective broadcast `operation:broadcast`.
 
 ## Shared package
 
-`packages/shared` contains Zod schemas for runtime validation, protocol types, canonical serialization, and static TypeScript types:
+`packages/shared` contains Zod schemas, protocol types, canonical serialization, and static TypeScript types:
 
-- `TaskSchema`, `CreateTaskInputSchema`, `UpdateTaskInputSchema`
-- `TaskOperationSchema`, `TaskOperationTypeSchema` (including `'TASK_IMPORT'` and `'TASK_RESOLVE'`)
-- `TaskStatusSchema`, `TaskPrioritySchema`, `TaskActionSchema`
-- `SupportedLanguageSchema`, `TaskActionCodeSchema`, `TaskItemCodeSchema`, `TaskUnitCodeSchema`, and optional `StructuredTaskInstructionSchema`
-- Status transition validator `isValidStatusTransition`
-- `PaperBridgeEnvelopeSchema`, `PaperBridgeTaskPayloadSchema`, `PaperBridgeV2EnvelopeSchema`, `PaperBridgeError`
-- Pure `TaskUpdatePayloadSchema`, `TaskAckPayloadSchema`, state-hash, change application, and `classifyIncomingOperation` rules in `sync.ts`, independent of React, Dexie, and transport.
-- Protocol constants: `PaperBridgeProtocolIdentifier = 'RELAY_MIDEN_PAPERBRIDGE'`, legacy `PAPERBRIDGE_PROTOCOL_VERSION = 1`, v2 update/ACK envelopes, and `MAX_PAPERBRIDGE_PAYLOAD_BYTES = 2048`
-- Deterministic canonical serialization (`canonicalJsonStringify`) and Web Crypto SHA-256 helpers (`computeEnvelopeChecksum`, `verifyEnvelopeChecksum`)
-- Pure encoding and decoding functions: `createPaperBridgeEnvelope`, `decodePaperBridgeMessage`
-- Health response contract (`phase: 2`)
+- Task models, structured instruction templates, status lifecycle progression rules.
+- PaperBridge v1 and v2 QR transfer envelopes, SHA-256 integrity verification, and canonical JSON stringification.
+- Pure causal synchronization engine: `classifyIncomingOperation`, `taskStateHash`, `applyTaskChanges`, `taskChanges`, `completeTaskChanges`.
+- Phase 6 LAN protocol schemas: `LAN_PROTOCOL_VERSION = 1`, `LanDeviceRegistrationSchema`, `LanRegistrationResultSchema`, `LanSyncRequestSchema`, `LanOperationSubmitSchema`, `LanOperationAcceptedSchema`, `LanOperationRejectedSchema`, `LanOperationBroadcastSchema`, `LanSyncBatchSchema`, and connection status types.
 
-The root build compiles shared first, then server and web.
-
-## Implemented offline-first data flow
+## Implemented data flow
 
 ```text
 User intent -> validated task command -> IndexedDB transaction -> local UI (reactive via useLiveQuery)
                                          (tasks + operations)
                                           │
-                                    [PaperBridge QR Protocol]
-                                          ├── Encode task & compute SHA-256 -> Scannable QR code
-                                          └── Decode camera/file -> Verify checksum -> User confirmation
-                                                  │
-                                          Atomic transaction (tasks + operations + imports)
-                                                  │
-                                    [Planned: Phase 7 durable outbox]
-                                                  │
-                                    [Planned: Phase 6 LAN transport]
+                  ┌───────────────────────┴───────────────────────┐
+                  ▼                                               ▼
+      [PaperBridge QR Protocol]                        [Phase 6 LAN Sync Service]
+      ├── QR encode & SHA-256                           ├── Submit committed local operation
+      └── Camera/upload decode & verify                 ├── Real-time broadcast to peers
+                  │                                     └── Cursor-based initial & manual sync
+                  ▼                                               │
+      Atomic IndexedDB transaction                     Server SQLite durable commit
+      (tasks + operations + imports)                   (WAL mode, monotonic sequence)
 ```
 
-Every mutation creates an atomic transaction updating `tasks` and appending a serializable `TaskOperation` record with revision and parent revision tracking. Tasks imported via PaperBridge are recorded as `TASK_IMPORT` with the receiving device as actor, the source message ID in the `imports` ledger for duplicate suppression, and the original creator and revision preserved.
+## Implemented LAN transport and real-time synchronization
 
-Structured instructions are optional to preserve Phase 2 free-text tasks. A structured task stores canonical action, item, unit, quantity, location, and optional notes; its visible sentence is derived at render time from the current language. Free-text titles, locations, and notes remain exactly as entered and are never passed through a translation service.
+Phase 6 implements a complete local network synchronization architecture:
 
-## Implemented PaperBridge offline transfer
+- **Host Binding**: Configurable host binding (`0.0.0.0` or custom LAN IP) allowing devices on Wi-Fi or mobile hotspots to connect.
+- **SQLite Persistence**: Operations and materialized task projections persist across server restarts in `data/relay-miden.sqlite`.
+- **Durable Commitment**: Operations are validated and committed to SQLite before returning application-level acceptance or broadcasting to peers.
+- **Causal Model Reuse**: LAN operations reuse Phase 5 `TaskUpdatePayload`, parent operation IDs, and SHA-256 state hashes.
+- **Conflict Handling**: Concurrent edits over LAN are detected using Phase 5 causal rules, recorded in conflict ledgers, and converged via `TASK_RESOLVE` operations.
+- **Mixed-Transport Compatibility**: Operations exchanged via PaperBridge QR and LAN share stable IDs and revisions, avoiding duplication.
+- **Phase 7 Readiness**: Clean interfaces exist for listing unsynchronized local operations, submitting by ID, and cursor tracking.
 
-Phase 3 implements versioned transfer envelopes (`RELAY_MIDEN_PAPERBRIDGE`, version 1).
+## Planned Phase 7 durable outbox and recovery
 
-- **Encoding**: Produces deterministic JSON, canonical key sorting, and SHA-256 checksums over envelope data. Rejects payloads exceeding 2,048 bytes to ensure QR scan reliability.
-- **Decoding**: Parses raw text, enforces version compatibility, validates structure with Zod, and verifies SHA-256 digest against accidental corruption.
-- **Send screen**: Generates real scannable QR matrices, PNG download files, and clipboard payload export.
-- **Receive screen**: Supports live camera scanning with rear camera preference, automatic camera cleanup, browser insecure context fallback, and 100% offline image file decoding via client-side Canvas and `jsQR`.
-- **Pre-import preview**: Presents full task metadata, priority indicator, sender device identity, and creation timestamp for explicit user confirmation.
-- **Multilingual payloads**: The optional canonical instruction is included in the existing task payload. Receivers can render it in their selected supported language while legacy envelopes without an instruction continue to import unchanged.
-- **Duplicate & Conflict suppression**: Deduplicates identical message IDs and revisions; guards against overwriting differing local revisions or resurrecting soft-deleted tasks.
-
-Phase 5 adds bidirectional QR updates and return acknowledgments. V1 `TASK_CREATE` remains unchanged. V2 `TASK_UPDATE` transports a single local operation with base/result state hashes and parent operation ID; `TASK_ACK` references a known outgoing message/operation/revision. Generated PNGs are decoded locally before presentation, retrying alternate sizes and error-correction levels when necessary. See [synchronization-protocol.md](synchronization-protocol.md) for classification, conflict resolution, and migration semantics.
-
-## Planned LAN transport and synchronization
-
-Phase 6 will add explicit local server discovery/configuration and a transport interface independent of the UI. Phase 7 adds a durable queue, automatic retries, reconciliation, and sync observability. Phase 5's pure classification functions and operation model can be reused by these future transports. No public internet or paid infrastructure should be required for core operation. Do not use the browser's online flag as proof that another device is reachable.
+Phase 7 will add a durable pending-operation queue, automatic reconnection, retry backoff scheduling, and synchronization telemetry. Phase 6 deliberately establishes connected-LAN synchronization and manual recovery without claiming durable background replay is complete.
 
 ## Security and browser limitations
 
-- Incoming QR and LAN data are treated as untrusted; payload length, format, protocol identifier, version, envelope structure, and cryptographic checksums are strictly validated before presentation or persistence.
-- SHA-256 provides integrity verification against accidental corruption; it is not a cryptographic signature and does not prove sender authenticity.
-- Camera access requires a secure context (HTTPS or localhost), user permission, and supported browser APIs. When accessed over LAN IP via HTTP, browsers disable `getUserMedia`; the application detects this and routes users to offline image file upload.
-- Browser storage can be evicted; private browsing and quotas vary. Quota errors and duplicate constraints are caught gracefully.
-- A development server is not a production server. The server binds to loopback by default; LAN exposure, origin policy, authentication, abuse limits, and TLS require Phase 6 decisions.
-- Production static hosting must fall back to `index.html` for client routes. Express does not currently serve the frontend.
-- A service worker, installability, offline asset caching, and refresh without a running server are Phase 8 work. Loading this UI once does not make it an offline-ready PWA.
+- Incoming QR and LAN data are treated as untrusted; envelopes, payload schemas, and state hashes are strictly validated.
+- Anonymous UUIDs provide causal attribution, not proof of identity. For trusted LANs, an optional session token restricts server access.
+- Browsers require secure contexts (HTTPS or localhost) for `getUserMedia` camera access; HTTP access over LAN IP routes users to file upload.
+- Mixed-content policies may block insecure HTTP/WS connections when web apps are served over HTTPS.
+- Local SQLite database files are excluded from version control (`.gitignore`).
 
 ## Verification boundaries
 
-Vitest exercises form validation, the Express health endpoint, the full `TaskRepository` suite against `fake-indexeddb`, PaperBridge v1/v2 serialization, SHA-256 determinism, malformed/oversized payload handling, causal classification, ACK matching, conflict resolution, IndexedDB migration, atomic rollback, and QR roundtrip decoding via `jsQR` (94 tests total). Playwright exercises the built frontend, real IndexedDB persistence across reloads, responsive overflow across 7 viewport widths, task lifecycle, multilingual views, isolated two-device QR task/update/ACK transfer, concurrent conflict convergence, duplicate suppression, dialogs, and styling tokens (18 tests total). Physical camera scanning has not been manually verified in Phase 5.
+Vitest exercises form validation, multilingual templates, PaperBridge v1/v2 QR encoding/decoding, the Express health endpoint, `TaskRepository` against `fake-indexeddb`, causal classification, ACK matching, conflict resolution, SQLite migrations, server Socket.IO operations, client LAN synchronization, and end-to-end client/server exchange (113 tests total across 9 test suites). Playwright exercises built frontend routes across 7 viewports without overflow, task creation/editing/status lifecycle, PaperBridge transfer, concurrent conflict convergence, and Connections page configuration (19 tests total). Physical multi-device LAN synchronization has not been verified in Phase 6.

@@ -6,9 +6,19 @@ Relay Miden is an offline-first, multilingual task-coordination project for the 
 
 ## Current status
 
-**Phase 5 implemented and verified on 25 October 2026.** Relay Miden now exchanges task changes and return acknowledgments through PaperBridge QR codes. Explicit state hashes and operation ancestry detect concurrent changes; users can resolve conflicts and transfer the resolution. Phase 4's local English, Malayalam, and Tamil rendering and PaperBridge v1 task import remain supported. No translation API, cloud service, or runtime network request is used.
+**Phase 6 implemented and verified on 25 October 2026.** Relay Miden now provides real-time local network synchronization over Wi-Fi, mobile hotspots, or local switches. An Express and Socket.IO coordinator backed by host-local SQLite persistence (`node:sqlite`) broadcasts task operations in real time. The browser-side LAN sync service reuses the Phase 5 causal ancestry and conflict detection engine, allowing multiple devices to synchronize without public internet access. Phase 5's PaperBridge QR transfers, Phase 4's multilingual rendering, and Phase 2's offline IndexedDB CRUD remain 100% operational.
 
 ### Implemented
+
+- **Local Network Server & Real-Time LAN Synchronization (Phase 6)**:
+  - **Local Host Coordinator (`apps/server`)**: Node.js, Express, and Socket.IO server backed by persistent SQLite (`node:sqlite` `DatabaseSync`) running in WAL mode with foreign key enforcement. Configurable host binding (`0.0.0.0` or custom LAN IP) and optional session token authentication (`LAN_SESSION_TOKEN`).
+  - **Typed LAN Protocol (`LAN_PROTOCOL_VERSION = 1`)**: Socket.IO envelopes validated by Zod schemas (`device:register`, `sync:request`, `operation:submit`, `operation:accepted`, `operation:rejected`, `operation:broadcast`).
+  - **Durable Persistence Before Acknowledgment**: Operations are validated and committed atomically to SQLite before the server returns an acceptance response or broadcasts to peers.
+  - **Causal Model & Conflict Reuse**: Directly reuses Phase 5 `TaskUpdatePayload`, parent operation IDs, state hashing (`SHA-256`), and conflict detection. Concurrent edits are captured in conflict ledgers and resolved cleanly using `TASK_RESOLVE` operations.
+  - **Incremental & Catch-Up Sync**: Monotonic server sequence numbers allow connecting or returning clients to request missing operations from their last known cursor. Bounded batches prevent unbounded payloads.
+  - **Client LAN Sync Service (`apps/web/src/services/lan/`)**: Reactive Socket.IO client managing connection state, local storage persistence for host address and session tokens, real-time operation submission on task mutation, and manual "Sync Now" recovery.
+  - **Reactive Connection UI**: Dashboard and Connections page reflect live connection states (`Connected`, `Connecting...`, `Syncing...`, `Disconnected`, `Error`) with full responsiveness down to 320px viewports without horizontal overflow.
+  - **Mixed Transport & Offline First**: Local IndexedDB remains the primary offline datastore. Tasks transferred via PaperBridge QR and synced over LAN share identical IDs, preventing duplicate records.
 
 - **Bidirectional PaperBridge synchronization (Phase 5)**:
   - PaperBridge v2 `TASK_UPDATE` and `TASK_ACK` envelopes with strict Zod payload validation, SHA-256 integrity checks, and the existing 2,048-byte QR payload ceiling. Version 1 `TASK_CREATE` decoding remains compatible.
@@ -126,6 +136,7 @@ relay-miden/
 │   │   │   ├── hooks/
 │   │   │   ├── lib/
 │   │   │   ├── pages/{ConnectionsPage.tsx,CreateTaskPage.tsx,DashboardPage.tsx,ReceivePage.tsx,SendPage.tsx,SettingsPage.tsx,TaskDetailsPage.tsx,TasksPage.tsx}
+│   │   │   ├── services/lan/{client.ts,connection.ts,index.ts,lan-sync.test.ts,protocol.ts,sync.ts}
 │   │   │   ├── services/paperbridge/{checksum.ts,decode.ts,encode.ts,index.ts,qr.ts,paperbridge.test.ts}
 │   │   │   ├── services/sync/{sync-repository.ts,sync-repository.test.ts}
 │   │   │   ├── styles/{palette.css,globals.css}
@@ -134,11 +145,11 @@ relay-miden/
 │   │   ├── index.html
 │   │   ├── vite.config.ts
 │   │   └── package.json
-│   └── server/src/{app.ts,app.test.ts,index.ts}
-├── packages/shared/src/{index.ts,paperbridge.ts,paperbridge-v2.ts,sync.ts,tasks.ts}
+│   └── server/src/{app.ts,app.test.ts,index.ts,server.test.ts,config/,db/,repositories/,services/,sockets/}
+├── packages/shared/src/{index.ts,lan.ts,multilingual.ts,paperbridge.ts,paperbridge-v2.ts,sync.ts,tasks.ts}
 ├── scripts/dev.mjs
 ├── tests/ui.spec.ts
-├── docs/{architecture.md,design-system.md,implementation-plan.md,paperbridge-protocol.md,synchronization-protocol.md}
+├── docs/{architecture.md,design-system.md,implementation-plan.md,lan-sync-protocol.md,multilingual-protocol.md,paperbridge-protocol.md,synchronization-protocol.md}
 ├── docs/history/
 ├── docs/verification/
 ├── AGENTS.md
@@ -184,6 +195,54 @@ npm run start -w @relay-miden/server # compiled server after build
 
 Forest Green `#004225`, Beige `#F5F5DC`, Amber `#FFB000`, and Peach `#FFCF9D` are declared centrally in [palette.css](apps/web/src/styles/palette.css). Components use variables or derived Tailwind tokens. Metric icons, priorities, and statuses use outline icons/colored text **without colored background fills or pills**. See [design-system.md](docs/design-system.md).
 
+## Local Network Synchronization: How to Connect Devices on a LAN
+
+Phase 6 enables real-time synchronization between multiple devices connected to the same Wi-Fi network or mobile hotspot without public internet access.
+
+### 1. Start the LAN Server (Host Coordinator)
+
+On the coordinator host device:
+
+```sh
+# Start the local server
+npm run dev:server
+# Or after build:
+npm run start -w @relay-miden/server
+```
+
+The server binds to `0.0.0.0:3001` by default and stores persistent data in `apps/server/data/relay-miden.sqlite` using SQLite WAL mode.
+
+**Environment Variables**:
+
+- `PORT`: Port to listen on (default: `3001`).
+- `HOST`: Host interface to bind to (default: `0.0.0.0` for LAN access).
+- `DB_PATH`: Path to SQLite database (default: `apps/server/data/relay-miden.sqlite`).
+- `LAN_SESSION_TOKEN`: Optional shared secret required from connecting devices.
+- `CORS_ORIGIN`: Allowed origins (default: `*` for local network access).
+
+### 2. Connect Client Devices
+
+1. Ensure all devices are connected to the same Wi-Fi network or mobile hotspot.
+2. Note the LAN IP address of the coordinator host (e.g., `192.168.1.50`).
+3. Open Relay Miden on any device and navigate to **Connections** (`/connections`).
+4. Enter the **LAN Server Address**: `http://192.168.1.50:3001`.
+5. Enter the **Session Token** if configured on the host.
+6. Click **Connect to LAN**. The status advances from `Connecting...` to `Connected` once device registration is acknowledged by the server.
+
+### 3. Real-Time Synchronization & Recovery
+
+- **Live Propagation**: While connected, any task created, edited, status updated, or conflict resolved is committed locally to IndexedDB and immediately submitted to the LAN server. The server persists the change in SQLite and broadcasts it to all other connected peers.
+- **Offline Independence**: If a device disconnects from the LAN, task creation and editing continue without interruption in local IndexedDB.
+- **Manual Sync Recovery**: Reconnecting devices can click **Sync Now** on the Connections page to catch up on any missed server operations and submit pending local operations.
+- **Conflict Handling**: If two devices concurrently modify a task while disconnected, both branches are preserved using Phase 5 causal ancestry. Users resolve the conflict in the Task Details view via _Keep Local_ or _Accept Incoming_, creating a transferable `TASK_RESOLVE` operation that converges both devices.
+- **QR / LAN Compatibility**: Tasks imported via PaperBridge QR and synced over LAN share the exact same UUIDs, revisions, and state hashes without duplicate creation.
+
+### 4. Network and Browser Considerations
+
+- **Firewall**: Ensure the host firewall permits inbound TCP traffic on port 3001.
+- **Camera Insecure Context**: Browsers disable camera access (`getUserMedia`) on unencrypted HTTP LAN IPs (`http://192.168.x.x`). Relay Miden automatically detects this and directs users to offline QR image file upload.
+- **HTTPS Mixed Content**: If the web frontend is hosted under HTTPS, browsers may block insecure `http://` or `ws://` connections to local LAN IPs.
+
 ## Ten-phase roadmap
 
 1. Repository setup and design system — implemented and verified.
@@ -191,13 +250,13 @@ Forest Green `#004225`, Beige `#F5F5DC`, Amber `#FFB000`, and Peach `#FFCF9D` ar
 3. PaperBridge QR protocol — implemented and verified.
 4. Multilingual communication — implemented and verified.
 5. Two-way QR task lifecycle — implemented and verified.
-6. Local Wi-Fi communication — planned.
+6. Local Wi-Fi communication — implemented and verified.
 7. Offline queue and synchronization — planned.
 8. PWA and mobile readiness — planned.
 9. Final UI and mission control — planned.
 10. Testing and demo preparation — planned.
 
-See [implementation-plan.md](docs/implementation-plan.md), [architecture.md](docs/architecture.md), [paperbridge-protocol.md](docs/paperbridge-protocol.md), [synchronization-protocol.md](docs/synchronization-protocol.md), and [multilingual-protocol.md](docs/multilingual-protocol.md) for boundaries and technical details.
+See [implementation-plan.md](docs/implementation-plan.md), [architecture.md](docs/architecture.md), [lan-sync-protocol.md](docs/lan-sync-protocol.md), [paperbridge-protocol.md](docs/paperbridge-protocol.md), [synchronization-protocol.md](docs/synchronization-protocol.md), and [multilingual-protocol.md](docs/multilingual-protocol.md) for boundaries and technical details.
 
 ## Verification results
 
@@ -209,30 +268,31 @@ Verified through 25 October 2026 with Node 24.15.0, npm 11.12.1, and Chromium on
 | `npm run dev`               | Both workspace servers started; frontend returned HTTP 200                                                                          |
 | Live `GET /health`          | HTTP 200 with `{ "status": "ok", "service": "relay-miden-server", "phase": 2 }`                                                     |
 | `npm run typecheck`         | Passed for web, server, and shared with zero errors                                                                                 |
-| `npm run lint`              | Passed with zero warnings                                                                                                           |
-| `npm test`                  | 94 tests passed across 7 files, including Phase 2–4 regressions and Phase 5 update, ACK, conflict, migration, and rollback coverage |
-| `npm run build`             | Shared/server TypeScript builds and production Vite build passed                                                                    |
-| `npm run test:e2e`          | 18 Playwright tests passed: responsive routes, CRUD, languages, v1 task transfer, v2 update/ACK exchange, and conflict convergence  |
-| Responsive coverage         | Verified across 7 viewport widths without horizontal overflow or uncaught page errors                                               |
+| `npm run lint`              | Passed with zero warnings and zero errors                                                                                           |
+| `npm test`                  | 113 tests passed across 9 suites: 12 server integration, 7 client LAN, and 94 Phase 1–5 regressions                                 |
+| `npm run build`             | Shared, server, and web production builds passed cleanly                                                                            |
+| `npm run test:e2e`          | 19 Playwright tests passed: 7 viewports without overflow, CRUD, languages, QR v1/v2 transfer, conflict convergence, LAN UI controls |
+| Responsive coverage         | Verified across 7 viewport widths (320px–1440px) without horizontal overflow or uncaught page errors                                |
+| Real-time LAN Sync          | Verified socket registration, persistent SQLite commit, incremental sync pagination, and broadcast across client instances          |
 | Multi-device QR transfer    | Verified end-to-end task export, image upload, decoding, pre-import review, and persistence across isolated browser contexts        |
-| Duplicate suppression       | Rescanning same QR code displays "Task Already Present" without creating duplicate tasks or duplicate operation logs                |
+| Duplicate suppression       | Rescanning same QR code or duplicate LAN operation displays idempotent result without duplicate tasks or operation logs             |
 | Offline CRUD & Persistence  | Task creation, inline edit, status updates, reopen, and soft deletion persist across browser reloads in IndexedDB                   |
-| Reactive Dashboard          | Dashboard counters and recent tasks update reactively via `useLiveQuery` without backend calls                                      |
+| Reactive Dashboard          | Dashboard counters, live status, and recent tasks update reactively via `useLiveQuery` and `useLanSync`                             |
 | Palette and indicator fills | Exact rendered palette verified; metric, priority, and status backgrounds transparent; brand hex values centralized in palette.css  |
 | `npm run format:check`      | Passed with 100% Prettier compliance                                                                                                |
 
-The production bundle passes, with Vite's existing advisory that the main JavaScript chunk exceeds 500 kB. Camera scanning on physical devices has not been manually verified this execution; the automated browser suite transfers generated PNGs through the local image-upload path.
+The production bundle passes, with Vite's existing advisory that the main JavaScript chunk exceeds 500 kB. Automated browser suites verify LAN UI controls, error states, and isolated client/server exchanges. Physical multi-device LAN testing on distinct hardware has not been manually verified this execution.
 
 ## Known limitations
 
 - Camera scanning requires HTTPS or localhost due to standard browser security policies on `getUserMedia`. Users accessing over an unencrypted local IP HTTP network must use the QR Image Upload option.
 - Single QR payloads are capped at 2,048 bytes to ensure reliable scanning on mobile camera viewfinders.
-- Several local edits require individual QR transfers in revision order. A missing operation is rejected and must be transferred before retrying the dependent update; this phase does not provide a durable deferred inbox or automatic delivery.
-- Conflict resolution supports choosing either complete branch. It does not offer field-by-field merging. The app cannot authenticate QR senders; device IDs and checksums are not signatures.
+- Several local edits over QR require individual transfers in revision order. A missing operation is rejected and must be transferred before retrying the dependent update.
+- Conflict resolution supports choosing either complete branch. It does not offer field-by-field merging.
 - Legacy v1 task snapshots can act as shared ancestry for subsequent v2 edits. Historical operations that predate causal IDs are retained unchanged; the protocol never fabricates missing parent records.
-- Connectivity cards remain demonstration status indicators; live LAN detection and Wi-Fi sync arrive in Phase 6.
+- Automatic durable background retry queues, reconnection replay, and retry scheduling arrive in Phase 7. Phase 6 requires active connection during mutation or manual "Sync Now" recovery.
 - Full service worker caching and offline startup installation arrive in Phase 8 (PWA).
-- Structured task codes and selected workflow UI are translated locally. Arbitrary locations and notes remain in the original language, by design; this phase does not claim free-form translation.
+- Structured task codes and selected workflow UI are translated locally. Arbitrary locations and notes remain in the original language, by design.
 
 ## Development history
 
@@ -243,5 +303,6 @@ Every Codex execution must update this README and create a unique, immutable Mar
 - [Phase 3 PaperBridge QR communication and verification — 2026-10-24](docs/history/phase-03-20261024T173000Z-d4e8c1.md)
 - [Phase 4 multilingual communication audit, fixes, and verification — 2026-10-25](docs/history/phase-04-20261024T185518Z-b1e5d9.md)
 - [Phase 5 bidirectional PaperBridge synchronization and verification — 2026-10-25](docs/history/phase-05-20261024T193303Z-1590d1.md)
+- [Phase 6 LAN server and real-time local network synchronization — 2026-10-25](docs/history/phase-06-20261024T203500Z-7f8a12.md)
 
-No Git commands were executed during Phase 1, Phase 2, Phase 3, Phase 4, or Phase 5. The original MIT [LICENSE](LICENSE) is preserved.
+No Git commands were executed during Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, or Phase 6. The original MIT [LICENSE](LICENSE) is preserved.
