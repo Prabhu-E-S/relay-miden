@@ -3,6 +3,7 @@ export * from './paperbridge.js';
 export * from './paperbridge-v2.js';
 export * from './sync.js';
 export * from './multilingual.js';
+export * from './lan.js';
 
 export type Language = 'en' | 'ml' | 'ta';
 

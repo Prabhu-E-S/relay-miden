@@ -97,10 +97,13 @@ export function applyTaskFilters(tasks: readonly Task[], filters: TaskFilters = 
     });
 }
 
+export type TaskOperationListener = (operation: TaskOperation) => void | Promise<void>;
+
 export class TaskRepository {
   private readonly now: () => string;
   private readonly taskId: () => string;
   private readonly operationId: () => string;
+  private readonly operationListeners: Set<TaskOperationListener> = new Set();
 
   constructor(
     readonly database: RelayMidenDatabase = db,
@@ -109,6 +112,23 @@ export class TaskRepository {
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.taskId = dependencies.taskId ?? (() => crypto.randomUUID());
     this.operationId = dependencies.operationId ?? (() => crypto.randomUUID());
+  }
+
+  addOperationListener(listener: TaskOperationListener): () => void {
+    this.operationListeners.add(listener);
+    return () => {
+      this.operationListeners.delete(listener);
+    };
+  }
+
+  notifyOperation(operation: TaskOperation): void {
+    for (const listener of this.operationListeners) {
+      try {
+        void listener(operation);
+      } catch (err) {
+        console.error('Operation listener error:', err);
+      }
+    }
   }
 
   async open(): Promise<void> {
@@ -166,6 +186,7 @@ export class TaskRepository {
           await this.database.operations.add(operation);
         },
       );
+      this.notifyOperation(operation);
       return task;
     } catch (error) {
       throw this.wrapDatabaseError(error, 'The task could not be created locally.');
@@ -218,8 +239,9 @@ export class TaskRepository {
     if (!parsed.success) throw this.invalidInput(parsed.error);
     const actorId = await this.getDeviceId();
 
+    let createdOperation: TaskOperation | undefined;
     try {
-      return await this.database.transaction(
+      const task = await this.database.transaction(
         'rw',
         [this.database.tasks, this.database.operations],
         async () => {
@@ -243,11 +265,14 @@ export class TaskRepository {
             existing.revision,
             parent?.operationId ?? null,
           );
+          createdOperation = operation;
           await this.database.tasks.put(task);
           await this.database.operations.add(operation);
           return task;
         },
       );
+      if (createdOperation) this.notifyOperation(createdOperation);
+      return task;
     } catch (error) {
       if (error instanceof TaskRepositoryError) throw error;
       throw this.wrapDatabaseError(error, 'The task changes could not be saved locally.');
@@ -263,8 +288,9 @@ export class TaskRepository {
     if (!parsedStatus.success) throw this.invalidInput(parsedStatus.error);
     const actorId = await this.getDeviceId();
 
+    let createdOperation: TaskOperation | undefined;
     try {
-      return await this.database.transaction(
+      const task = await this.database.transaction(
         'rw',
         [this.database.tasks, this.database.operations],
         async () => {
@@ -289,11 +315,14 @@ export class TaskRepository {
             existing.revision,
             parent?.operationId ?? null,
           );
+          createdOperation = operation;
           await this.database.tasks.put(task);
           await this.database.operations.add(operation);
           return task;
         },
       );
+      if (createdOperation) this.notifyOperation(createdOperation);
+      return task;
     } catch (error) {
       if (error instanceof TaskRepositoryError) throw error;
       throw this.wrapDatabaseError(error, 'The task status could not be saved locally.');
@@ -302,8 +331,9 @@ export class TaskRepository {
 
   async deleteTask(id: string): Promise<Task> {
     const actorId = await this.getDeviceId();
+    let createdOperation: TaskOperation | undefined;
     try {
-      return await this.database.transaction(
+      const task = await this.database.transaction(
         'rw',
         [this.database.tasks, this.database.operations],
         async () => {
@@ -323,11 +353,14 @@ export class TaskRepository {
             existing.revision,
             parent?.operationId ?? null,
           );
+          createdOperation = operation;
           await this.database.tasks.put(task);
           await this.database.operations.add(operation);
           return task;
         },
       );
+      if (createdOperation) this.notifyOperation(createdOperation);
+      return task;
     } catch (error) {
       if (error instanceof TaskRepositoryError) throw error;
       throw this.wrapDatabaseError(error, 'The task could not be deleted locally.');

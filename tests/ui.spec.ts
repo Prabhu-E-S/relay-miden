@@ -465,3 +465,21 @@ test('concurrent device edits remain intact until a QR conflict resolution conve
     await contextB.close();
   }
 });
+
+test('connections page provides LAN server configuration and status controls', async ({ page }) => {
+  await page.goto('/connections');
+  await expect(page.getByRole('heading', { name: 'Local Network Synchronization' })).toBeVisible();
+  await expect(page.getByLabel('LAN Server Address')).toBeVisible();
+  await expect(page.getByLabel(/Session Token/)).toBeVisible();
+
+  const urlInput = page.getByLabel('LAN Server Address');
+  await urlInput.fill('http://192.168.1.100:3001');
+  await expect(page.getByRole('button', { name: 'Connect to LAN' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Sync Now' })).toBeDisabled();
+
+  // Test invalid URL input handling
+  await urlInput.fill('invalid-url');
+  await page.getByRole('button', { name: 'Connect to LAN' }).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('Invalid LAN server URL');
+});
