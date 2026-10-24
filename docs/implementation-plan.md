@@ -8,7 +8,7 @@ Only the current explicitly authorized phase may be implemented. Later phases be
 | 2     | Offline task engine: IndexedDB, schemas, migrations, validated create/read/update workflows     | Implemented and verified |
 | 3     | PaperBridge QR protocol: versioned envelope, encoding/decoding, validation, duplicate detection | Implemented and verified |
 | 4     | Multilingual communication: English, Malayalam, Tamil templates and localized task workflows    | Implemented and verified |
-| 5     | Two-way QR task lifecycle: acknowledgments, status transfer, conflict semantics                 | Planned                  |
+| 5     | Two-way QR task lifecycle: acknowledgments, status transfer, conflict semantics                 | Implemented and verified |
 | 6     | Local Wi-Fi communication: explicit local connectivity and LAN transport                        | Planned                  |
 | 7     | Offline queue and synchronization: durable retries, reconciliation, idempotency                 | Planned                  |
 | 8     | PWA and mobile readiness: manifest, caching, installability, offline refresh                    | Planned                  |
@@ -30,3 +30,7 @@ Verify versioned PaperBridge envelope format (`RELAY_MIDEN_PAPERBRIDGE` v1), det
 ## Phase 4 verification gate
 
 Verify bundled English (`en`), Malayalam (`ml`), and Tamil (`ta`) dictionaries with matching canonical code coverage; a backward-compatible optional `StructuredTaskInstruction` on tasks; language-specific instruction templates; local language-preference persistence; structured-task creation and preview; dynamic dashboard, list, details, send, and receive display; and PaperBridge QR round trips that preserve canonical instructions while retaining legacy payload compatibility. Run the Phase 2/3 regression suite, i18n unit tests, browser language-flow coverage, formatting, strict type checks, linting, and a production build. No translation API, LAN transport, acknowledgment transfer, or synchronization is authorized by this gate.
+
+## Phase 5 verification gate
+
+Verify v1 task QR regression plus v2 update and acknowledgment encoding/decoding, explicit state-hash and operation ancestry, duplicate and stale classification, missing-parent handling, atomic incoming updates, persistent conflict records, user-selected resolution operations, two-device convergence, outgoing ACK matching, browser QR round trips, multilingual canonical data preservation, migration from Dexie version 2, strict TypeScript, lint, unit tests, responsive browser tests, and production build. Phase 6 LAN transport and Phase 7 automatic synchronization remain planned.

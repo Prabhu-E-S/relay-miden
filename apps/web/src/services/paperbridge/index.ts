@@ -2,6 +2,7 @@ export * from './checksum.js';
 export * from './encode.js';
 export * from './decode.js';
 export * from './qr.js';
+export { decodeAnyPaperBridgeMessage, type AnyPaperBridgeEnvelope } from '@relay-miden/shared';
 export {
   PaperBridgeProtocolIdentifier,
   PAPERBRIDGE_PROTOCOL_VERSION,

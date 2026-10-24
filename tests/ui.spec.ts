@@ -336,3 +336,132 @@ test('end-to-end multi-device PaperBridge transfer via QR image file upload', as
   await contextA.close();
   await contextB.close();
 });
+
+test('two devices exchange task update and acknowledgment QR codes', async ({ browser }) => {
+  test.setTimeout(90_000);
+  const contextA = await browser.newContext();
+  const contextB = await browser.newContext();
+  const a = await contextA.newPage();
+  const b = await contextB.newPage();
+  async function uploadQR(page: Page, image: string) {
+    await page.goto('/receive');
+    const chooser = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Upload image' }).click();
+    await (
+      await chooser
+    ).setFiles({
+      name: 'transfer.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from(image.replace(/^data:image\/png;base64,/, ''), 'base64'),
+    });
+  }
+  try {
+    const id = await createTask(a, { title: 'QR return update' });
+    await a.goto(`/send?task=${id}`);
+    const createQR = a.getByAltText(/PaperBridge QR code for task/);
+    await expect(createQR).toBeVisible();
+    await expect
+      .poll(() =>
+        createQR.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0),
+      )
+      .toBe(true);
+    const createImage = (await createQR.getAttribute('src'))!;
+    await uploadQR(b, createImage);
+    await expect(b.getByRole('heading', { name: 'QR Decoded Successfully' })).toBeVisible();
+    await b.getByRole('button', { name: 'Import Task' }).click();
+    await expect(b.getByRole('heading', { name: 'Task Imported Successfully' })).toBeVisible();
+    await b.goto(`/tasks/${id}`);
+    await b.getByRole('button', { name: 'Mark Acknowledged' }).click();
+    await expect(b.getByText('Status updated to Acknowledged.')).toBeVisible();
+    await b.setViewportSize({ width: 390, height: 780 });
+    await b.goto(`/send?task=${id}&mode=update`);
+    await expect(b.getByAltText('Task update PaperBridge QR code')).toBeVisible();
+    expect(await b.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const updateImage = (await b
+      .getByAltText('Task update PaperBridge QR code')
+      .getAttribute('src'))!;
+    await a.setViewportSize({ width: 320, height: 740 });
+    await uploadQR(a, updateImage);
+    await expect(a.getByRole('heading', { name: 'Review Task Update' })).toBeVisible();
+    expect(await a.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await a.getByRole('button', { name: 'Apply Update' }).click();
+    await expect(a.getByRole('heading', { name: 'Task Update Applied' })).toBeVisible();
+    const ackImage = (await a
+      .getByAltText('Acknowledgment PaperBridge QR code')
+      .getAttribute('src'))!;
+    await a.goto(`/tasks/${id}`);
+    await expect(a.getByText('Current status · revision 2')).toBeVisible();
+    await uploadQR(b, ackImage);
+    await expect(b.getByRole('heading', { name: 'Review Acknowledgment' })).toBeVisible();
+    await b.getByRole('button', { name: 'Record Acknowledgment' }).click();
+    await expect(b.getByRole('heading', { name: 'Acknowledgment Recorded' })).toBeVisible();
+    await b.goto(`/tasks/${id}`);
+    await expect(b.getByText(/0 pending outgoing update/)).toBeVisible();
+  } finally {
+    await contextA.close();
+    await contextB.close();
+  }
+});
+
+test('concurrent device edits remain intact until a QR conflict resolution converges them', async ({
+  browser,
+}) => {
+  test.setTimeout(90_000);
+  const contextA = await browser.newContext();
+  const contextB = await browser.newContext();
+  const a = await contextA.newPage();
+  const b = await contextB.newPage();
+  async function transfer(from: Page, to: Page, alt: string) {
+    const image = from.getByAltText(alt);
+    await expect(image).toBeVisible();
+    const data = (await image.getAttribute('src'))!;
+    await to.goto('/receive');
+    const chooser = to.waitForEvent('filechooser');
+    await to.getByRole('button', { name: 'Upload image' }).click();
+    await (
+      await chooser
+    ).setFiles({
+      name: 'conflict-qr.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from(data.replace(/^data:image\/png;base64,/, ''), 'base64'),
+    });
+  }
+  try {
+    const id = await createTask(a, { title: 'Original task' });
+    await a.goto(`/send?task=${id}`);
+    await transfer(a, b, 'PaperBridge QR code for task: Original task');
+    await expect(b.getByRole('heading', { name: 'QR Decoded Successfully' })).toBeVisible();
+    await b.getByRole('button', { name: 'Import Task' }).click();
+    await expect(b.getByRole('heading', { name: 'Task Imported Successfully' })).toBeVisible();
+
+    await a.goto(`/tasks/${id}`);
+    await a.getByRole('button', { name: 'Edit' }).click();
+    await a.getByLabel('Task Title').fill('A local choice');
+    await a.getByRole('button', { name: 'Save Changes' }).click();
+    await expect(a.getByRole('heading', { name: 'A local choice' })).toBeVisible();
+    await b.goto(`/tasks/${id}`);
+    await b.getByRole('button', { name: 'Mark Acknowledged' }).click();
+    await expect(b.getByText('Status updated to Acknowledged.')).toBeVisible();
+    await b.goto(`/send?task=${id}&mode=update`);
+    await transfer(b, a, 'Task update PaperBridge QR code');
+    await expect(a.getByRole('heading', { name: 'Review Task Update' })).toBeVisible();
+    await a.getByRole('button', { name: 'Apply Update' }).click();
+    await expect(a.getByRole('heading', { name: 'Resolve Task Conflict' })).toBeVisible();
+    await a.getByRole('link', { name: 'Resolve Conflict' }).click();
+    await expect(a.getByRole('heading', { name: 'Resolve Task Conflict' })).toBeVisible();
+    await a.getByRole('button', { name: 'Keep Local Version' }).click();
+    await expect(a.getByText(/Conflict resolved locally/)).toBeVisible();
+    await a.goto(`/send?task=${id}&mode=update`);
+    await expect(a.getByAltText('Task update PaperBridge QR code')).toBeVisible();
+    await transfer(a, b, 'Task update PaperBridge QR code');
+    await expect(b.getByRole('heading', { name: 'Review Task Update' })).toBeVisible();
+    await b.getByRole('button', { name: 'Apply Update' }).click();
+    await expect(b.getByRole('heading', { name: 'Task Update Applied' })).toBeVisible();
+    await b.goto(`/tasks/${id}`);
+    await expect(b.getByRole('heading', { name: 'A local choice' })).toBeVisible();
+    await expect(b.getByText('Current status · revision 3')).toBeVisible();
+  } finally {
+    await contextA.close();
+    await contextB.close();
+  }
+});

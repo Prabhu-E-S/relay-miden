@@ -31,9 +31,11 @@ export function QRDisplay({ task, deviceId }: { task: Task; deviceId: string }) 
         setError(null);
 
         const dataUrl = await generateQRCodeDataUrl(result.rawJson, {
-          width: 320,
+          width: 1024,
           margin: 4,
-          darkColor: '#004225',
+          darkColor: getComputedStyle(document.documentElement)
+            .getPropertyValue('--color-primary')
+            .trim(),
           lightColor: '#ffffff',
         });
         if (cancelled) return;
