@@ -7,12 +7,11 @@ export function CreateTaskPage() {
     <>
       <PageHeader
         title={t.createTask}
-        description="A little coordination goes a long way. Prepare a task for your community."
+        description="A little coordination goes a long way. Save a task privately on this device."
       />
       <QuickTaskForm />
       <p className="mt-4 max-w-xl text-xs leading-relaxed text-muted">
-        This form demonstrates validation and an unsaved preview. Offline storage and real task
-        creation are planned for Phase 2.
+        Tasks are written directly to IndexedDB. No backend or internet connection is used.
       </p>
     </>
   );

@@ -8,7 +8,7 @@ export function ConnectionsPage() {
     <>
       <PageHeader
         title={t.connections}
-        description="Different ways to stay coordinated. All statuses below are demonstration values, not device readings."
+        description="Different ways to stay coordinated. Connectivity statuses remain demonstration values, not device readings."
       />
       <div className="grid max-w-4xl items-start gap-5 md:grid-cols-[300px_1fr]">
         <ConnectionStatus />
@@ -19,7 +19,7 @@ export function ConnectionsPage() {
               {
                 icon: WifiOff,
                 title: 'No internet',
-                text: 'Tasks will live on your device with IndexedDB. Planned for Phase 2.',
+                text: 'Task CRUD and status changes now work through local IndexedDB.',
               },
               {
                 icon: QrCode,

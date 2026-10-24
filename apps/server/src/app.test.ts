@@ -24,7 +24,7 @@ describe('backend foundation', () => {
     expect(await response.json()).toEqual({
       status: 'ok',
       service: 'relay-miden-server',
-      phase: 1,
+      phase: 2,
     });
   });
   it('has no prematurely implemented task API', async () => {

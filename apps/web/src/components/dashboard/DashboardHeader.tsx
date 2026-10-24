@@ -14,7 +14,7 @@ export function DashboardHeader() {
         Create and share tasks even without internet, no shared network, and across languages.
       </p>
       <p className="mt-3 text-[10px] uppercase tracking-[.12em] text-muted">
-        Demonstration workspace · Sample data
+        Local workspace · Saved on this device
       </p>
     </div>
   );

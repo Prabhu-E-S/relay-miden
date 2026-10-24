@@ -6,30 +6,39 @@ Relay Miden is an offline-first, multilingual task-coordination project for the 
 
 ## Current status
 
-**Phase 1 implemented and verified on 24 October 2026.** This is a demonstration workspace. No operational task data is stored or transferred. The project does not yet work as an offline-installed application. Phase 2 has not been started.
+**Phase 2 implemented and verified on 24 October 2026.** Local task management is fully functional and backed by IndexedDB via Dexie.js. Tasks, revision histories, and persistent anonymous device identities are stored entirely within the browser. Creating tasks, editing details, progressing statuses, soft deletion, searching, filtering, and live dashboard metrics operate offline without requiring any backend connection or cloud service. Phase 3 has not been started.
 
 ### Implemented
 
 - npm-workspaces monorepo with frontend, backend, and shared package.
 - Reference-based forest-green/cream responsive UI with desktop sidebar, mobile header and bottom navigation.
 - Dashboard, task form/list/details, QR send/receive layouts, connections, and settings routes.
-- Accessible native form controls, validation, unsaved task previews, sample task search/filter, and status-selection preview.
+- Dexie.js / IndexedDB offline database (`relay-miden-db`) with `tasks`, `operations`, and `settings` tables and compound indexes.
+- Zod runtime validation schemas for tasks, inputs, and operation payloads in `@relay-miden/shared`.
+- Atomic local transactions pairing every task mutation with an immutable append-only `TaskOperation` record.
+- Monotonic revision incrementing and `parentRevision` tracking for future synchronization.
+- Persistent anonymous device UUID identity auto-provisioned in IndexedDB.
+- Live reactive queries (`useLiveQuery`) updating dashboard metrics, recent task lists, and filterable task views.
+- Real-time search across titles, locations, and descriptions, multi-criteria status/priority filters, and deterministic sorting.
+- Explicit status lifecycle progression (`pending` -> `acknowledged` -> `in_progress` -> `completed`) and controlled task reopening.
+- Soft-delete lifecycle excluding records from normal listings while preserving operation history for future recovery.
+- Accessible native form controls, inline validation, and graceful IndexedDB initialization and quota error handling.
 - In-memory English/Malayalam/Tamil navigation dictionaries and language settings; partial interface coverage only.
 - Centralized exact brand palette, semantic tokens, locally bundled DM Sans, and Lucide outline icons.
-- Real Express `/health` endpoint and typed shared vocabulary.
+- Real Express `/health` endpoint returning phase 2 status; strictly backend-independent task CRUD.
 - Strict TypeScript, ESLint, Prettier, Vitest, browser verification setup, architecture and permanent execution-history policies.
 
 ### In progress
 
-- No active implementation phase. Phase 1 verification is complete; the project is ready for a separately authorized Phase 2.
+- No active implementation phase. Phase 2 verification is complete; the project is ready for a separately authorized Phase 3 (PaperBridge QR protocol).
 
 ### Planned
 
-Offline task management with IndexedDB, PaperBridge QR task transfer, two-way acknowledgment/status updates, local Wi-Fi/LAN communication, synchronization queues, complete English/Malayalam/Tamil task templates, and installable PWA behavior. All core functionality must eventually work without paid APIs or cloud infrastructure.
+PaperBridge QR task transfer, two-way acknowledgment/status updates, local Wi-Fi/LAN communication, synchronization queues, complete English/Malayalam/Tamil task templates, and installable PWA behavior. All core functionality must eventually work without paid APIs or cloud infrastructure.
 
 ## Stack
 
-React 19, Vite 8, TypeScript 6 (strict), Tailwind CSS 4 with its Vite plugin, React Router 8, Lucide React, Node.js 24, Express 5, npm workspaces, ESLint 10, Prettier 3, Vitest 5, and Playwright for browser verification. Dependency versions are locked in `package-lock.json`; TypeScript is kept within the lint parser's supported range. No paid service is used.
+React 19, Vite 8, TypeScript 6 (strict), Tailwind CSS 4 with its Vite plugin, React Router 8, Dexie.js 4, Lucide React, Node.js 24, Express 5, npm workspaces, ESLint 10, Prettier 3, Vitest 5, and Playwright for browser verification. Dependency versions are locked in `package-lock.json`; TypeScript is kept within the lint parser's supported range. No paid service is used.
 
 ## Repository structure
 
@@ -39,17 +48,18 @@ relay-miden/
 │   ├── web/
 │   │   ├── public/assets/
 │   │   ├── src/
-│   │   │   ├── components/{layout,dashboard,tasks,ui}/
-│   │   │   ├── pages/
+│   │   │   ├── components/{dashboard,layout,tasks,ui}/
+│   │   │   ├── db/{database.ts,errors.ts,task-repository.ts,task-repository.test.ts}
 │   │   │   ├── hooks/
 │   │   │   ├── lib/
+│   │   │   ├── pages/
 │   │   │   ├── styles/{palette.css,globals.css}
 │   │   │   ├── App.tsx
 │   │   │   └── main.tsx
 │   │   ├── index.html
 │   │   ├── vite.config.ts
 │   │   └── package.json
-│   └── server/src/{app.ts,index.ts}
+│   └── server/src/{app.ts,app.test.ts,index.ts}
 ├── packages/shared/src/index.ts
 ├── scripts/dev.mjs
 ├── tests/ui.spec.ts
@@ -72,7 +82,7 @@ relay-miden/
 
 ## Prerequisites and installation
 
-Use **Node.js 24 LTS** and **npm 11+**. Initial package/browser installation needs internet; the running Phase 1 UI uses local assets. On Windows, PowerShell is supported.
+Use **Node.js 24 LTS** and **npm 11+**. Initial package/browser installation needs internet; the running UI uses local assets. On Windows, PowerShell is supported.
 
 ```sh
 npm ci
@@ -115,7 +125,7 @@ The root build orders shared, server, then web. `test:e2e` starts a production f
 | -------------- | ---------------------------------- | ---------------------------------------------------------- |
 | `PORT`         | `3001`                             | Validated Express port                                     |
 | `HOST`         | `127.0.0.1`                        | Express bind address; LAN transport is not implemented     |
-| `VITE_API_URL` | `http://127.0.0.1:3001` in example | Reserved public frontend API URL; not called by Phase 1 UI |
+| `VITE_API_URL` | `http://127.0.0.1:3001` in example | Reserved public frontend API URL; not called by Phase 2 UI |
 
 Root `.env` is optional and ignored. Node loads it for server dev/start; Vite reads it through `envDir`. `VITE_` values are public: never put secrets there. `.env.example` contains only documented non-secret values.
 
@@ -126,7 +136,7 @@ Forest Green `#004225`, Beige `#F5F5DC`, Amber `#FFB000`, and Peach `#FFCF9D` ar
 ## Ten-phase roadmap
 
 1. Repository setup and design system — implemented and verified.
-2. Offline task engine — planned.
+2. Offline task engine — implemented and verified.
 3. PaperBridge QR protocol — planned.
 4. Multilingual communication — planned.
 5. Two-way QR task lifecycle — planned.
@@ -136,45 +146,40 @@ Forest Green `#004225`, Beige `#F5F5DC`, Amber `#FFB000`, and Peach `#FFCF9D` ar
 9. Final UI and mission control — planned.
 10. Testing and demo preparation — planned.
 
-See [implementation-plan.md](docs/implementation-plan.md) and [architecture.md](docs/architecture.md) for boundaries, future data flow, and browser/security limitations. Passing Phase 1 does not authorize Phase 2 implementation.
+See [implementation-plan.md](docs/implementation-plan.md) and [architecture.md](docs/architecture.md) for boundaries, future data flow, and browser/security limitations. Passing Phase 2 does not authorize Phase 3 implementation.
 
 ## Verification results
 
 Verified on 24 October 2026 with Node 24.15.0, npm 11.12.1, and Chromium 156 on Windows:
 
-| Check                       | Actual result                                                                                                                                                                   |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Dependency installation     | Passed; 275 packages added, zero vulnerabilities reported by npm                                                                                                                |
-| `npm run dev`               | Both workspace servers started; frontend returned HTTP 200                                                                                                                      |
-| Live `GET /health`          | HTTP 200 with the documented service/phase JSON                                                                                                                                 |
-| `npm run typecheck`         | Passed for web, server, and shared                                                                                                                                              |
-| `npm run lint`              | Passed with zero warnings                                                                                                                                                       |
-| `npm test`                  | 14 tests passed across 2 files                                                                                                                                                  |
-| `npm run build`             | Shared/server TypeScript builds and production Vite build passed                                                                                                                |
-| `npm run test:e2e`          | 12 tests passed, including all 8 routes at 7 viewport widths (56 route/width combinations)                                                                                      |
-| Responsive coverage         | 320, 375, 390, 430, 768, 1024, 1440px; no horizontal overflow or uncaught page errors                                                                                           |
-| Browser interactions        | Form errors/focus, unsaved preview/reset, priorities, search/filter/empty states, task details, language selection, mobile navigation, route focus, disabled QR controls passed |
-| Palette and indicator fills | Exact rendered palette verified; metric, priority, and status backgrounds transparent; source hex values occur only in palette.css                                              |
-| Screenshot review           | Desktop, tablet, and all eight mobile routes inspected against the supplied reference                                                                                           |
-| `npm run format:check`      | Passed                                                                                                                                                                          |
-
-The first backend test attempt hit a sandbox localhost restriction; it passed with local networking enabled. Browser tests exposed a radio hit-area issue, now fixed with full-option native radio targets. Two initial assertions were corrected for case-sensitive accessible names and CSS minification of the equivalent `beige` color. Final results above describe the corrected implementation. Chromium downloads recovered from transient certificate errors without disabling certificate validation.
-
-Reviewed screenshots: [desktop](docs/verification/phase-01-desktop.png), [tablet](docs/verification/phase-01-tablet.png), [mobile](docs/verification/phase-01-mobile.png). Generated browser reports remain in the ignored `playwright-report/` directory. Safari, Firefox, real mobile hardware, and assistive-technology audits were not performed.
+| Check                       | Actual result                                                                                                                      |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Dependency installation     | Passed; zero vulnerabilities reported by npm                                                                                       |
+| `npm run dev`               | Both workspace servers started; frontend returned HTTP 200                                                                         |
+| Live `GET /health`          | HTTP 200 with `{ "status": "ok", "service": "relay-miden-server", "phase": 2 }`                                                    |
+| `npm run typecheck`         | Passed for web, server, and shared                                                                                                 |
+| `npm run lint`              | Passed with zero warnings                                                                                                          |
+| `npm test`                  | 28 tests passed across 3 files (`task-repository.test.ts`, `task-form.test.ts`, `app.test.ts`)                                     |
+| `npm run build`             | Shared/server TypeScript builds and production Vite build passed                                                                   |
+| `npm run test:e2e`          | 14 test suites passed (56 route/width combinations across 320, 375, 390, 430, 768, 1024, 1440px)                                   |
+| Responsive coverage         | Verified across 7 viewport widths without horizontal overflow or uncaught page errors                                              |
+| Offline CRUD & Persistence  | Task creation, inline edit, status updates, reopen, and soft deletion persist across browser reloads in IndexedDB                  |
+| Reactive Dashboard          | Dashboard counters and recent tasks update reactively via `useLiveQuery` without backend calls                                     |
+| Palette and indicator fills | Exact rendered palette verified; metric, priority, and status backgrounds transparent; brand hex values centralized in palette.css |
+| `npm run format:check`      | Passed                                                                                                                             |
 
 ## Known limitations
 
-- Task rows, times, metric totals, and connection states are static demonstration data. Dashboard totals are independent design fixtures, not aggregates of the four example tasks.
-- Form submission only displays an unsaved preview; navigating or refreshing loses it. Status previews never update the fixtures.
-- QR layouts do not encode, decode, download, upload, or transfer tasks. Camera controls are disabled and never request permission.
-- No IndexedDB, service worker, real offline refresh, LAN transport, network detection, synchronization queue, accounts, or task API exists.
-- Language selection changes only navigation and selected headings for the current session. Task content is English; full localization, fonts across devices, and linguistic review belong to Phase 4.
-- Modern-browser desktop/mobile verification does not establish compatibility on all devices. Real-device checks and assistive-technology review remain part of later validation.
+- QR layouts and scanner views remain layout placeholders; encoding, decoding, camera permissions, and file uploads arrive in Phase 3.
+- Connectivity cards remain demonstration status indicators; live LAN detection and Wi-Fi sync arrive in Phase 6.
+- Full service worker caching and offline startup installation arrive in Phase 8 (PWA).
+- Language switching applies to navigation and selected headings; full multilingual templates and translation arrive in Phase 4.
 
 ## Development history
 
 Every Codex execution must update this README and create a unique, immutable Markdown record in `docs/history/` named `phase-XX-YYYYMMDDTHHMMSSZ-unique.md`, including failures, retries, and follow-ups. Existing records must never be modified, overwritten, reused, or deleted. Each record captures the prompt/objective, files, commands, implementation, actual test results, issues, and next steps. [AGENTS.md](AGENTS.md) enforces these rules, scope boundaries, and the prohibition on all Git commands.
 
 - [Phase 1 initialization and verification — 2026-10-24](docs/history/phase-01-20261024T142943Z-9c4b1e.md)
+- [Phase 2 recovery and verification — 2026-10-24](docs/history/phase-02-recovery-20261024T153500Z-a7f3c2.md)
 
-No Git commands were executed during Phase 1. The original MIT [LICENSE](LICENSE) is preserved.
+No Git commands were executed during Phase 1 or Phase 2. The original MIT [LICENSE](LICENSE) is preserved.

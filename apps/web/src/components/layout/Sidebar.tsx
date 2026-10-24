@@ -33,10 +33,10 @@ export function Sidebar() {
         <div>
           <p className="text-sm font-medium">Built for offline</p>
           <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-sidebar-muted)]">
-            Local storage is coming in Phase 2.
+            Tasks are saved locally in IndexedDB.
           </p>
           <p className="mt-3 text-[10px] uppercase tracking-[.13em] text-[var(--color-sidebar-muted)]">
-            Phase 01 · UI preview
+            Phase 02 · Offline tasks
           </p>
         </div>
       </div>
