@@ -20,6 +20,7 @@ import {
 } from '@relay-miden/shared';
 import { db, type PaperBridgeImportRecord, type RelayMidenDatabase } from './database';
 import { TaskRepositoryError } from './errors';
+import { resetAbandonedInFlight, backfillLegacyOutbox } from '../services/lan/outbox';
 
 const DeviceIdSchema = z.uuid();
 const DEVICE_ID_KEY = 'device-id';
@@ -135,6 +136,8 @@ export class TaskRepository {
     try {
       await this.database.open();
       await this.getDeviceId();
+      await resetAbandonedInFlight(this.database);
+      await backfillLegacyOutbox(this.database);
     } catch (error) {
       throw this.wrapDatabaseError(error, 'The local task database could not be opened.');
     }
@@ -180,10 +183,18 @@ export class TaskRepository {
     try {
       await this.database.transaction(
         'rw',
-        [this.database.tasks, this.database.operations],
+        [this.database.tasks, this.database.operations, this.database.outbox],
         async () => {
           await this.database.tasks.add(task);
           await this.database.operations.add(operation);
+          await this.database.outbox.add({
+            operationId: operation.operationId,
+            taskId: task.id,
+            originDeviceId: actorId,
+            status: 'PENDING',
+            attemptCount: 0,
+            createdAt: timestamp,
+          });
         },
       );
       this.notifyOperation(operation);
@@ -243,7 +254,7 @@ export class TaskRepository {
     try {
       const task = await this.database.transaction(
         'rw',
-        [this.database.tasks, this.database.operations],
+        [this.database.tasks, this.database.operations, this.database.outbox],
         async () => {
           const existing = await this.requireActiveTask(id);
           const candidate: Record<string, unknown> = {
@@ -268,6 +279,14 @@ export class TaskRepository {
           createdOperation = operation;
           await this.database.tasks.put(task);
           await this.database.operations.add(operation);
+          await this.database.outbox.add({
+            operationId: operation.operationId,
+            taskId: task.id,
+            originDeviceId: actorId,
+            status: 'PENDING',
+            attemptCount: 0,
+            createdAt: task.updatedAt,
+          });
           return task;
         },
       );
@@ -292,7 +311,7 @@ export class TaskRepository {
     try {
       const task = await this.database.transaction(
         'rw',
-        [this.database.tasks, this.database.operations],
+        [this.database.tasks, this.database.operations, this.database.outbox],
         async () => {
           const existing = await this.requireActiveTask(id);
           if (!isValidStatusTransition(existing.status, parsedStatus.data, options.allowReopen)) {
@@ -318,6 +337,14 @@ export class TaskRepository {
           createdOperation = operation;
           await this.database.tasks.put(task);
           await this.database.operations.add(operation);
+          await this.database.outbox.add({
+            operationId: operation.operationId,
+            taskId: task.id,
+            originDeviceId: actorId,
+            status: 'PENDING',
+            attemptCount: 0,
+            createdAt: task.updatedAt,
+          });
           return task;
         },
       );
@@ -335,7 +362,7 @@ export class TaskRepository {
     try {
       const task = await this.database.transaction(
         'rw',
-        [this.database.tasks, this.database.operations],
+        [this.database.tasks, this.database.operations, this.database.outbox],
         async () => {
           const existing = await this.requireActiveTask(id);
           const timestamp = this.now();
@@ -356,6 +383,14 @@ export class TaskRepository {
           createdOperation = operation;
           await this.database.tasks.put(task);
           await this.database.operations.add(operation);
+          await this.database.outbox.add({
+            operationId: operation.operationId,
+            taskId: task.id,
+            originDeviceId: actorId,
+            status: 'PENDING',
+            attemptCount: 0,
+            createdAt: timestamp,
+          });
           return task;
         },
       );

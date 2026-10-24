@@ -6,9 +6,20 @@ Relay Miden is an offline-first, multilingual task-coordination project for the 
 
 ## Current status
 
-**Phase 6 implemented and verified on 25 October 2026.** Relay Miden now provides real-time local network synchronization over Wi-Fi, mobile hotspots, or local switches. An Express and Socket.IO coordinator backed by host-local SQLite persistence (`node:sqlite`) broadcasts task operations in real time. The browser-side LAN sync service reuses the Phase 5 causal ancestry and conflict detection engine, allowing multiple devices to synchronize without public internet access. Phase 5's PaperBridge QR transfers, Phase 4's multilingual rendering, and Phase 2's offline IndexedDB CRUD remain 100% operational.
+**Phase 7 implemented and verified on 25 October 2026.** Relay Miden now provides a durable offline operation queue (outbox) and automatic LAN reconnection recovery. When devices lose LAN connection, all local task creations, edits, status updates, and conflict resolutions commit atomically in IndexedDB alongside outbox entries. When LAN returns, the client automatically reconnects with bounded exponential backoff and jitter, restores anonymous device registration, pulls missing server operations with contiguous cursor safety, and replays pending local operations in strict causal dependency order. Concurrent conflicts are preserved and converged via Phase 5 resolution operations. Phase 6's LAN server, Phase 5's PaperBridge QR transfers, Phase 4's multilingual rendering, and Phase 2's offline IndexedDB CRUD remain 100% operational.
 
 ### Implemented
+
+- **Durable Offline Queue, Automatic Reconnection & Recovery (Phase 7)**:
+  - **Durable Outbox Queue (IndexedDB Version 4)**: Persistent `outbox` table in Dexie with compound indices. Every local task operation (`TASK_CREATE`, `TASK_UPDATE`, `TASK_DELETE`, `TASK_RESOLVE`) commits atomically in the same database transaction as the task and operation log.
+  - **Queue State Machine**: Strict transitions (`PENDING` -> `IN_FLIGHT` -> `ACKNOWLEDGED` / `BLOCKED` / `FAILED`). Interrupted `IN_FLIGHT` operations recover automatically to `PENDING` on database open.
+  - **Automatic LAN Reconnection**: Autonomous exponential backoff (1s, 2s, 4s, 8s, 16s, capped at 30s) with $\pm 20\%$ random jitter to prevent reconnect storms. Browser `online` and `visibilitychange` lifecycle awareness.
+  - **Causal Operation Replay**: Strict parent-first dependency ordering ensures task creations and base revisions replay before dependent edits. Missing dependencies transition operations to `BLOCKED` without infinite retry loops.
+  - **Idempotent Replay & Lost Acknowledgment Recovery**: Retries carry stable canonical `operationId`s. The server returns `ALREADY_APPLIED`, and the client records durable acknowledgment without duplicating revisions.
+  - **Contiguous Cursor Safety**: Server cursors advance monotonically only after incoming operations successfully commit to local storage. Invalidation detection safely resets stale cursors if the server database was wiped or replaced.
+  - **Concurrent Conflict Reconciliation**: Offline concurrent edits trigger Phase 5 causal conflict detection upon reconnection, recording audit entries in `db.conflicts`. User resolutions generate canonical `TASK_RESOLVE` operations that replay over LAN.
+  - **Transport Provenance Isolation**: Remote tasks imported via PaperBridge QR are stored as `TASK_IMPORT` and never falsely enqueued into the local outbox.
+  - **Reactive Telemetry & Controls**: Dashboard displays live Offline Queue indicators; Connections page displays Outbox metrics (Pending, In Flight, Blocked / Error, Acknowledged) and a "Retry Blocked & Failed Operations" action.
 
 - **Local Network Server & Real-Time LAN Synchronization (Phase 6)**:
   - **Local Host Coordinator (`apps/server`)**: Node.js, Express, and Socket.IO server backed by persistent SQLite (`node:sqlite` `DatabaseSync`) running in WAL mode with foreign key enforcement. Configurable host binding (`0.0.0.0` or custom LAN IP) and optional session token authentication (`LAN_SESSION_TOKEN`).
@@ -251,47 +262,46 @@ The server binds to `0.0.0.0:3001` by default and stores persistent data in `app
 4. Multilingual communication — implemented and verified.
 5. Two-way QR task lifecycle — implemented and verified.
 6. Local Wi-Fi communication — implemented and verified.
-7. Offline queue and synchronization — planned.
+7. Offline queue and synchronization — implemented and verified.
 8. PWA and mobile readiness — planned.
 9. Final UI and mission control — planned.
 10. Testing and demo preparation — planned.
 
-See [implementation-plan.md](docs/implementation-plan.md), [architecture.md](docs/architecture.md), [lan-sync-protocol.md](docs/lan-sync-protocol.md), [paperbridge-protocol.md](docs/paperbridge-protocol.md), [synchronization-protocol.md](docs/synchronization-protocol.md), and [multilingual-protocol.md](docs/multilingual-protocol.md) for boundaries and technical details.
+See [implementation-plan.md](docs/implementation-plan.md), [architecture.md](docs/architecture.md), [offline-queue-recovery.md](docs/offline-queue-recovery.md), [lan-sync-protocol.md](docs/lan-sync-protocol.md), [paperbridge-protocol.md](docs/paperbridge-protocol.md), [synchronization-protocol.md](docs/synchronization-protocol.md), and [multilingual-protocol.md](docs/multilingual-protocol.md) for boundaries and technical details.
 
 ## Verification results
 
 Verified through 25 October 2026 with Node 24.15.0, npm 11.12.1, and Chromium on Windows:
 
-| Check                       | Actual result                                                                                                                       |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Dependency installation     | Passed; zero vulnerabilities reported by npm                                                                                        |
-| `npm run dev`               | Both workspace servers started; frontend returned HTTP 200                                                                          |
-| Live `GET /health`          | HTTP 200 with `{ "status": "ok", "service": "relay-miden-server", "phase": 2 }`                                                     |
-| `npm run typecheck`         | Passed for web, server, and shared with zero errors                                                                                 |
-| `npm run lint`              | Passed with zero warnings and zero errors                                                                                           |
-| `npm test`                  | 113 tests passed across 9 suites: 12 server integration, 7 client LAN, and 94 Phase 1–5 regressions                                 |
-| `npm run build`             | Shared, server, and web production builds passed cleanly                                                                            |
-| `npm run test:e2e`          | 19 Playwright tests passed: 7 viewports without overflow, CRUD, languages, QR v1/v2 transfer, conflict convergence, LAN UI controls |
-| Responsive coverage         | Verified across 7 viewport widths (320px–1440px) without horizontal overflow or uncaught page errors                                |
-| Real-time LAN Sync          | Verified socket registration, persistent SQLite commit, incremental sync pagination, and broadcast across client instances          |
-| Multi-device QR transfer    | Verified end-to-end task export, image upload, decoding, pre-import review, and persistence across isolated browser contexts        |
-| Duplicate suppression       | Rescanning same QR code or duplicate LAN operation displays idempotent result without duplicate tasks or operation logs             |
-| Offline CRUD & Persistence  | Task creation, inline edit, status updates, reopen, and soft deletion persist across browser reloads in IndexedDB                   |
-| Reactive Dashboard          | Dashboard counters, live status, and recent tasks update reactively via `useLiveQuery` and `useLanSync`                             |
-| Palette and indicator fills | Exact rendered palette verified; metric, priority, and status backgrounds transparent; brand hex values centralized in palette.css  |
-| `npm run format:check`      | Passed with 100% Prettier compliance                                                                                                |
+| Check                       | Actual result                                                                                                                                                |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Dependency installation     | Passed; zero vulnerabilities reported by npm                                                                                                                 |
+| `npm run dev`               | Both workspace servers started; frontend returned HTTP 200                                                                                                   |
+| Live `GET /health`          | HTTP 200 with `{ "status": "ok", "service": "relay-miden-server", "phase": 2 }`                                                                              |
+| `npm run typecheck`         | Passed for web, server, and shared with zero errors                                                                                                          |
+| `npm run lint`              | Passed with zero warnings and zero errors                                                                                                                    |
+| `npm test`                  | 126 tests passed across 10 suites: 13 outbox/sync recovery, 7 client LAN, 12 server integration, and 94 Phase 1–5 regressions                                |
+| `npm run build`             | Shared, server, and web production builds passed cleanly                                                                                                     |
+| `npm run test:e2e`          | 20 Playwright tests passed: 7 viewports without overflow, CRUD, languages, QR transfer, conflict convergence, LAN server controls, outbox queue indicators   |
+| Responsive coverage         | Verified across 7 viewport widths (320px–1440px) without horizontal overflow or uncaught page errors                                                         |
+| Durable Outbox & Recovery   | Verified atomic local mutation enqueueing, abandoned `IN_FLIGHT` recovery on restart, legacy backfill, and live outbox queue telemetry on dashboard/settings |
+| Reconnection & Backoff      | Autonomous reconnection with bounded exponential backoff (1s–30s) and $\pm 20\%$ jitter; clean listener teardown; explicit disconnect suppression            |
+| Causal Replay & Idempotency | Verified parent-first revision replay (1 -> 2 -> 3), duplicate idempotence (`ALREADY_APPLIED`), lost ACK recovery, and missing-parent blocking               |
+| Contiguous Cursor Safety    | Verified server cursor advances only after local durable commits; invalid server sequence resets detected without data loss                                  |
+| Conflict Reconciliation     | Offline concurrent edits trigger Phase 5 causal detection; user resolutions generate canonical `TASK_RESOLVE` operations replaying over LAN to convergence   |
+| QR / LAN Interoperability   | PaperBridge QR imports tracked separately as `TASK_IMPORT` without false outbox publishing; shared operation IDs prevent duplicates                          |
+| `npm run format:check`      | Passed with 100% Prettier compliance                                                                                                                         |
 
 The production bundle passes, with Vite's existing advisory that the main JavaScript chunk exceeds 500 kB. Automated browser suites verify LAN UI controls, error states, and isolated client/server exchanges. Physical multi-device LAN testing on distinct hardware has not been manually verified this execution.
 
 ## Known limitations
 
+- Background execution requires an open browser tab or window. Full service worker caching and offline startup installation arrive in Phase 8 (PWA).
 - Camera scanning requires HTTPS or localhost due to standard browser security policies on `getUserMedia`. Users accessing over an unencrypted local IP HTTP network must use the QR Image Upload option.
 - Single QR payloads are capped at 2,048 bytes to ensure reliable scanning on mobile camera viewfinders.
 - Several local edits over QR require individual transfers in revision order. A missing operation is rejected and must be transferred before retrying the dependent update.
 - Conflict resolution supports choosing either complete branch. It does not offer field-by-field merging.
 - Legacy v1 task snapshots can act as shared ancestry for subsequent v2 edits. Historical operations that predate causal IDs are retained unchanged; the protocol never fabricates missing parent records.
-- Automatic durable background retry queues, reconnection replay, and retry scheduling arrive in Phase 7. Phase 6 requires active connection during mutation or manual "Sync Now" recovery.
-- Full service worker caching and offline startup installation arrive in Phase 8 (PWA).
 - Structured task codes and selected workflow UI are translated locally. Arbitrary locations and notes remain in the original language, by design.
 
 ## Development history
@@ -304,5 +314,6 @@ Every Codex execution must update this README and create a unique, immutable Mar
 - [Phase 4 multilingual communication audit, fixes, and verification — 2026-10-25](docs/history/phase-04-20261024T185518Z-b1e5d9.md)
 - [Phase 5 bidirectional PaperBridge synchronization and verification — 2026-10-25](docs/history/phase-05-20261024T193303Z-1590d1.md)
 - [Phase 6 LAN server and real-time local network synchronization — 2026-10-25](docs/history/phase-06-20261024T203500Z-7f8a12.md)
+- [Phase 7 durable offline queue, automatic reconnection, and synchronization recovery — 2026-10-25](docs/history/phase-07-20261024T211000Z-9e4a7b.md)
 
-No Git commands were executed during Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, or Phase 6. The original MIT [LICENSE](LICENSE) is preserved.
+No Git commands were executed during Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Phase 6, or Phase 7. The original MIT [LICENSE](LICENSE) is preserved.

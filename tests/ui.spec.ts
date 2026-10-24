@@ -483,3 +483,30 @@ test('connections page provides LAN server configuration and status controls', a
   await expect(page.getByRole('alert')).toBeVisible();
   await expect(page.getByRole('alert')).toContainText('Invalid LAN server URL');
 });
+
+test('phase 7: durable offline queue displays pending operations and retry actions', async ({
+  page,
+}) => {
+  // 1. Visit Dashboard and verify initial connection status
+  await page.goto('/');
+  await expect(page.getByText('Offline Queue')).toBeVisible();
+  await expect(page.getByText('All committed')).toBeVisible();
+
+  // 2. Create a task while offline
+  await createTask(page, { title: 'Offline water delivery' });
+
+  // 3. Visit Dashboard and verify Offline Queue indicator reflects the pending operation
+  await page.goto('/');
+  await expect(page.getByText('1 pending')).toBeVisible();
+
+  // 4. Visit Connections page and verify outbox queue panel
+  await page.goto('/connections');
+  await expect(
+    page.getByRole('heading', { name: 'Durable Offline Operation Queue', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText('Pending', { exact: true })).toBeVisible();
+  await expect(page.getByText('Awaiting replay')).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Retry Blocked & Failed Operations' }),
+  ).toBeVisible();
+});

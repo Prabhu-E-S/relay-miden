@@ -1,6 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie';
 import type { Task, TaskOperation } from '@relay-miden/shared';
-import type { PaperBridgeV2Envelope, TaskUpdatePayload } from '@relay-miden/shared';
+import type { PaperBridgeV2Envelope, TaskUpdatePayload, OutboxEntry } from '@relay-miden/shared';
 
 export const DATABASE_NAME = 'relay-miden-db';
 
@@ -57,6 +57,7 @@ export class RelayMidenDatabase extends Dexie {
   outgoing!: EntityTable<OutgoingRecord, 'messageId'>;
   acknowledgments!: EntityTable<AcknowledgmentRecord, 'messageId'>;
   conflicts!: EntityTable<SyncConflictRecord, 'id'>;
+  outbox!: EntityTable<OutboxEntry, 'operationId'>;
 
   constructor(name = DATABASE_NAME) {
     super(name);
@@ -74,6 +75,10 @@ export class RelayMidenDatabase extends Dexie {
       outgoing: 'messageId, taskId, operationId, acknowledgedAt',
       acknowledgments: 'messageId, acknowledgedMessageId, taskId',
       conflicts: 'id, taskId, incomingOperationId, resolvedAt',
+    });
+    this.version(4).stores({
+      outbox:
+        'operationId, taskId, status, originDeviceId, createdAt, nextRetryAt, [status+nextRetryAt], [taskId+status]',
     });
   }
 }

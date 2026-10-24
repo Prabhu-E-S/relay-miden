@@ -1,5 +1,15 @@
 import { useState } from 'react';
-import { Network, QrCode, WifiOff, RefreshCw, Unplug, Radio } from 'lucide-react';
+import {
+  Network,
+  QrCode,
+  WifiOff,
+  RefreshCw,
+  Unplug,
+  Radio,
+  Inbox,
+  AlertTriangle,
+  RotateCcw,
+} from 'lucide-react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { ConnectionStatus } from '../components/dashboard/ConnectionStatus';
 import { useLanguage } from '../hooks/use-language';
@@ -14,11 +24,22 @@ export function ConnectionsPage() {
     lastError,
     lastSyncAt,
     serverSequence,
+    reconnectAttempt,
+    nextRetrySeconds,
+    outboxStats,
+    pendingCount,
+    blockedCount,
+    failedCount,
+    inFlightCount,
+    acknowledgedCount,
     isConnected,
+    isReconnecting,
     isSyncing,
     syncMessage,
     connect,
     disconnect,
+    reconnectNow,
+    retryBlockedAndFailed,
     setServerUrl,
     setSessionToken,
     syncNow,
@@ -26,6 +47,7 @@ export function ConnectionsPage() {
 
   const [inputUrl, setInputUrl] = useState(serverUrl);
   const [inputToken, setInputToken] = useState(sessionToken);
+  const [isRetryingQueue, setIsRetryingQueue] = useState(false);
 
   const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,15 +56,25 @@ export function ConnectionsPage() {
     await connect(inputUrl, inputToken);
   };
 
+  const handleRetryQueue = async () => {
+    setIsRetryingQueue(true);
+    try {
+      await retryBlockedAndFailed();
+    } finally {
+      setIsRetryingQueue(false);
+    }
+  };
+
   return (
     <>
       <PageHeader
         title={t.connections}
-        description="Local Wi-Fi and PaperBridge offline channels. Synchronization occurs entirely without public cloud access."
+        description="Local Wi-Fi, durable offline queue, and PaperBridge channels. Offline operations replay automatically upon LAN reconnection."
       />
       <div className="grid max-w-4xl items-start gap-5 md:grid-cols-[300px_1fr]">
         <ConnectionStatus />
         <div className="space-y-5">
+          {/* LAN Connection Panel */}
           <section className="panel p-4 md:p-5" aria-labelledby="lan-heading">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <h2 id="lan-heading" className="text-base font-semibold flex items-center gap-2">
@@ -51,7 +83,13 @@ export function ConnectionsPage() {
               </h2>
               <span
                 className={`text-xs font-medium px-2.5 py-1 rounded border border-line ${
-                  isConnected ? 'text-brand' : 'text-muted'
+                  isConnected
+                    ? 'text-brand'
+                    : isReconnecting
+                      ? 'text-accent'
+                      : status === 'ERROR'
+                        ? 'text-danger'
+                        : 'text-muted'
                 }`}
               >
                 {status}
@@ -95,13 +133,31 @@ export function ConnectionsPage() {
                 />
               </div>
 
+              {isReconnecting && (
+                <div
+                  className="rounded border border-line bg-surface p-3 text-xs text-accent"
+                  role="status"
+                >
+                  <p className="font-semibold flex items-center gap-1.5">
+                    <RefreshCw size={14} className="animate-spin" aria-hidden="true" />
+                    Automatic Reconnection Active
+                  </p>
+                  <p className="mt-1 text-muted">
+                    Attempt #{reconnectAttempt}.{' '}
+                    {nextRetrySeconds !== null && nextRetrySeconds > 0
+                      ? `Retrying in ${nextRetrySeconds}s with exponential backoff...`
+                      : 'Connecting shortly...'}
+                  </p>
+                </div>
+              )}
+
               {lastError && (
                 <div
                   className="rounded border border-line bg-surface p-3 text-xs text-danger"
                   role="alert"
                 >
-                  <p className="font-semibold">Connection Error</p>
-                  <p className="mt-0.5 text-muted">{lastError}</p>
+                  <p className="font-semibold">Connection Notice</p>
+                  <p className="mt-0.5 text-muted break-words">{lastError}</p>
                 </div>
               )}
 
@@ -117,14 +173,22 @@ export function ConnectionsPage() {
 
               <div className="flex flex-wrap gap-2.5 pt-1">
                 {!isConnected ? (
-                  <button
-                    type="submit"
-                    className="button-primary"
-                    disabled={status === 'CONNECTING' || !inputUrl.trim()}
-                  >
-                    <Radio size={16} aria-hidden="true" />
-                    {status === 'CONNECTING' ? 'Connecting...' : 'Connect to LAN'}
-                  </button>
+                  <>
+                    <button
+                      type="submit"
+                      className="button-primary"
+                      disabled={status === 'CONNECTING' || !inputUrl.trim()}
+                    >
+                      <Radio size={16} aria-hidden="true" />
+                      {status === 'CONNECTING' ? 'Connecting...' : 'Connect to LAN'}
+                    </button>
+                    {isReconnecting && (
+                      <button type="button" onClick={reconnectNow} className="button-secondary">
+                        <RefreshCw size={16} aria-hidden="true" />
+                        Retry Now
+                      </button>
+                    )}
+                  </>
                 ) : (
                   <button
                     type="button"
@@ -164,28 +228,110 @@ export function ConnectionsPage() {
             </div>
           </section>
 
+          {/* Phase 7 Durable Outbox Queue Panel */}
+          <section className="panel p-4 md:p-5" aria-labelledby="outbox-heading">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h2 id="outbox-heading" className="text-base font-semibold flex items-center gap-2">
+                <Inbox size={20} className="text-brand" aria-hidden="true" />
+                Durable Offline Operation Queue
+              </h2>
+              <span className="text-xs text-muted font-medium">
+                {outboxStats.total} total recorded
+              </span>
+            </div>
+
+            <p className="mb-4 text-xs leading-relaxed text-muted">
+              Every locally generated task creation, update, deletion, and conflict resolution is
+              stored atomically in the IndexedDB outbox. When LAN connectivity returns, pending
+              operations replay in strict causal order.
+            </p>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-4">
+              <div className="rounded border border-line bg-surface p-3">
+                <span className="block text-[11px] text-muted">Pending</span>
+                <span className="text-lg font-semibold text-accent">{pendingCount}</span>
+                <span className="block text-[10px] text-muted mt-0.5">Awaiting replay</span>
+              </div>
+              <div className="rounded border border-line bg-surface p-3">
+                <span className="block text-[11px] text-muted">In Flight</span>
+                <span className="text-lg font-semibold text-brand">{inFlightCount}</span>
+                <span className="block text-[10px] text-muted mt-0.5">Submitting now</span>
+              </div>
+              <div className="rounded border border-line bg-surface p-3">
+                <span className="block text-[11px] text-muted">Blocked / Error</span>
+                <span
+                  className={`text-lg font-semibold ${
+                    blockedCount > 0 || failedCount > 0 ? 'text-danger' : 'text-foreground'
+                  }`}
+                >
+                  {blockedCount + failedCount}
+                </span>
+                <span className="block text-[10px] text-muted mt-0.5">
+                  {blockedCount} blocked · {failedCount} failed
+                </span>
+              </div>
+              <div className="rounded border border-line bg-surface p-3">
+                <span className="block text-[11px] text-muted">Acknowledged</span>
+                <span className="text-lg font-semibold text-brand">{acknowledgedCount}</span>
+                <span className="block text-[10px] text-muted mt-0.5">Server accepted</span>
+              </div>
+            </div>
+
+            {(blockedCount > 0 || failedCount > 0) && (
+              <div className="rounded border border-line bg-surface p-3 mb-4 text-xs">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle size={16} className="text-accent shrink-0 mt-0.5" />
+                  <div className="text-muted">
+                    <p className="font-semibold text-foreground">Action Required</p>
+                    <p className="mt-0.5">
+                      Some operations are blocked due to missing parent dependencies or concurrent
+                      conflicts. Check the Conflicts tab or retry queue entries.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2.5">
+              <button
+                type="button"
+                onClick={handleRetryQueue}
+                className="button-secondary text-xs"
+                disabled={isRetryingQueue || (blockedCount === 0 && failedCount === 0)}
+              >
+                <RotateCcw
+                  size={14}
+                  className={isRetryingQueue ? 'animate-spin' : ''}
+                  aria-hidden="true"
+                />
+                Retry Blocked & Failed Operations
+              </button>
+            </div>
+          </section>
+
+          {/* Architecture Information */}
           <section className="panel p-4 md:p-5">
-            <h2 className="mb-5 text-base font-semibold">Designed for the unexpected</h2>
+            <h2 className="mb-5 text-base font-semibold">Reliability & Multi-Transport Strategy</h2>
             <div className="space-y-6">
               {[
                 {
                   icon: WifiOff,
-                  title: 'No internet',
-                  text: 'Task CRUD and status changes work through local IndexedDB without interruption.',
-                },
-                {
-                  icon: QrCode,
-                  title: 'No shared network',
-                  text: 'PaperBridge transfers task data through bidirectional high-density QR codes.',
+                  title: 'Durable offline operation queue',
+                  text: 'Local mutations persist in IndexedDB with transactional consistency. No operation is dropped on transport loss.',
                 },
                 {
                   icon: Network,
-                  title: 'A nearby connection',
-                  text: 'Exchange operations in real-time over local Wi-Fi or hotspot via the Phase 6 LAN server.',
+                  title: 'Automatic reconnection & causal replay',
+                  text: 'Exponential backoff with jitter reconnects automatically. Operations replay strictly in parent-first dependency order.',
+                },
+                {
+                  icon: QrCode,
+                  title: 'QR & LAN transport interoperability',
+                  text: 'PaperBridge QR transfers work independently. Remote QR imports preserve provenance without false outbox re-publishing.',
                 },
               ].map(({ icon: Icon, title, text }) => (
                 <div key={title} className="flex gap-3">
-                  <Icon size={21} className="text-brand" aria-hidden="true" />
+                  <Icon size={21} className="text-brand shrink-0" aria-hidden="true" />
                   <div>
                     <h3 className="text-sm font-semibold">{title}</h3>
                     <p className="mt-1 text-xs leading-relaxed text-muted">{text}</p>
