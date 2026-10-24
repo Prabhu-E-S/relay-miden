@@ -23,6 +23,8 @@ export const TaskActionSchema = z.enum([
   'CUSTOM',
 ]);
 
+import { StructuredTaskInstructionSchema } from './multilingual.js';
+
 export const CreateTaskInputSchema = z
   .object({
     action: TaskActionSchema.default('CUSTOM'),
@@ -32,6 +34,7 @@ export const CreateTaskInputSchema = z
     unit: optionalTrimmedText(UNIT_MAX),
     location: z.string().trim().min(1, 'Add a location.').max(LOCATION_MAX),
     priority: TaskPrioritySchema.default('medium'),
+    instruction: StructuredTaskInstructionSchema.optional(),
   })
   .superRefine((input, context) => {
     if (input.quantity !== undefined && !input.unit) {
@@ -52,6 +55,7 @@ export const UpdateTaskInputSchema = z
     unit: z.union([z.string().trim().max(UNIT_MAX), z.null()]).optional(),
     location: z.string().trim().min(1, 'Add a location.').max(LOCATION_MAX).optional(),
     priority: TaskPrioritySchema.optional(),
+    instruction: z.union([StructuredTaskInstructionSchema, z.null()]).optional(),
   })
   .refine((input) => Object.keys(input).length > 0, 'Provide at least one task change.');
 
@@ -70,6 +74,7 @@ export const TaskSchema = z.object({
   createdBy: z.string().trim().min(1).max(DEVICE_ID_MAX),
   revision: z.number().int().positive(),
   deletedAt: z.iso.datetime({ offset: true }).nullable().optional(),
+  instruction: StructuredTaskInstructionSchema.optional(),
 });
 
 export const TaskOperationTypeSchema = z.enum([
@@ -99,6 +104,7 @@ export type ParsedCreateTaskInput = z.output<typeof CreateTaskInputSchema>;
 export type UpdateTaskInput = z.input<typeof UpdateTaskInputSchema>;
 export type TaskOperationType = z.infer<typeof TaskOperationTypeSchema>;
 export type TaskOperation = z.infer<typeof TaskOperationSchema>;
+export { StructuredTaskInstructionSchema, type StructuredTaskInstruction } from './multilingual.js';
 
 export const TASK_STATUS_SEQUENCE: readonly TaskStatus[] = [
   'pending',

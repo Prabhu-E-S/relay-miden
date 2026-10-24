@@ -1,5 +1,8 @@
 import type { TaskPriority } from '@relay-miden/shared';
+import { useLanguage } from '../../hooks/use-language';
+
 const priorities: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
+
 export function PrioritySelector({
   value,
   onChange,
@@ -9,14 +12,18 @@ export function PrioritySelector({
   onChange: (priority: TaskPriority) => void;
   name: string;
 }) {
+  const { dict } = useLanguage();
+
   return (
     <fieldset>
-      <legend className="mb-2 text-xs font-semibold">Priority</legend>
+      <legend className="mb-2 text-xs font-semibold">{dict.form.priorityLabel}</legend>
       <div className="grid grid-cols-4 gap-1">
         {priorities.map((priority) => (
           <label
             key={priority}
-            className={`priority-label priority-${priority} relative flex min-h-11 cursor-pointer items-center justify-center border-b-2 text-xs capitalize ${value === priority ? 'border-current font-semibold' : 'border-transparent'}`}
+            className={`priority-label priority-${priority} relative flex min-h-11 cursor-pointer items-center justify-center border-b-2 text-xs capitalize ${
+              value === priority ? 'border-current font-semibold' : 'border-transparent'
+            }`}
           >
             <input
               type="radio"
@@ -27,7 +34,7 @@ export function PrioritySelector({
               onChange={() => onChange(priority)}
             />
             <span className="pointer-events-none rounded-sm px-1 py-2 peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2">
-              {priority.charAt(0).toUpperCase() + priority.slice(1)}
+              {dict.priorities[priority] ?? priority}
             </span>
           </label>
         ))}

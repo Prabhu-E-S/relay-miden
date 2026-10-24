@@ -76,10 +76,12 @@ describe('TaskRepository', () => {
       title: 'Deliver potable water',
       priority: 'urgent',
       description: null,
+      instruction: null,
     });
     expect(updated.title).toBe('Deliver potable water');
     expect(updated.priority).toBe('urgent');
     expect(updated.description).toBeUndefined();
+    expect(updated.instruction).toBeUndefined();
     expect(updated.revision).toBe(2);
     expect(updated.id).toBe(created.id);
     expect(updated.createdAt).toBe(created.createdAt);

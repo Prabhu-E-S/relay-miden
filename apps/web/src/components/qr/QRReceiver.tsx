@@ -18,11 +18,13 @@ import {
 } from '../../services/paperbridge';
 import { taskRepository, type ImportTaskResult } from '../../db/task-repository';
 import { PriorityIndicator } from '../tasks/PriorityIndicator';
-import { actionLabels, formatDateTime, statusLabels } from '../../lib/task-display';
+import { actionLabels, formatDateTime } from '../../lib/task-display';
+import { useLanguage } from '../../hooks/use-language';
 
 type ReceiverStep = 'select' | 'camera' | 'preview' | 'result';
 
 export function QRReceiver() {
+  const { dict, formatTask } = useLanguage();
   const [step, setStep] = useState<ReceiverStep>('select');
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -70,16 +72,13 @@ export function QRReceiver() {
 
     if (!isSecure) {
       setCameraError(
-        'Camera access requires a secure context (HTTPS or localhost). If accessing over a local Wi-Fi HTTP IP, browser security blocks the camera. Please use the "Upload QR Image" option below.',
+        'Camera access requires a secure context (HTTPS or localhost). If accessing over a local Wi-Fi HTTP IP, browser security blocks the camera. Please use the "Upload image" option below.',
       );
       return;
     }
 
     try {
-      // Ensure any previous scanner instance is cleared
       stopCameraScanner();
-
-      // Wait for DOM to render the reader element
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       const readerElement = document.getElementById('paperbridge-camera-viewport');
@@ -99,12 +98,11 @@ export function QRReceiver() {
           aspectRatio: 1.0,
         },
         async (decodedText) => {
-          // Stop camera immediately once a QR is captured
           stopCameraScanner();
           await handleRawDecodedText(decodedText);
         },
         () => {
-          // Per-frame misses are expected while searching for QR
+          // Per-frame misses are expected
         },
       );
       setCameraActive(true);
@@ -116,16 +114,16 @@ export function QRReceiver() {
         message.toLowerCase().includes('denied')
       ) {
         setCameraError(
-          'Camera permission was denied. Please grant camera permission in your browser or use "Upload QR Image".',
+          'Camera permission was denied. Please grant camera permission in your browser or use "Upload image".',
         );
       } else if (
         message.toLowerCase().includes('notfound') ||
         message.toLowerCase().includes('no device')
       ) {
-        setCameraError('No camera found on this device. Please use "Upload QR Image".');
+        setCameraError('No camera found on this device. Please use "Upload image".');
       } else {
         setCameraError(
-          `Could not start camera (${message}). You can use "Upload QR Image" to import without camera access.`,
+          `Could not start camera (${message}). You can use "Upload image" to import without camera access.`,
         );
       }
     }
@@ -155,9 +153,7 @@ export function QRReceiver() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Reset input value so same file can be selected again if needed
     event.target.value = '';
-
     setIsProcessing(true);
     setValidationError(null);
     setCameraError(null);
@@ -225,7 +221,7 @@ export function QRReceiver() {
         >
           <div className="flex items-center gap-2 text-danger">
             <AlertCircle size={17} />
-            <span className="font-semibold">QR Validation Failed</span>
+            <span className="font-semibold">{dict.paperbridge.validationFailedTitle}</span>
           </div>
           <p className="mt-1 leading-relaxed text-muted">{validationError}</p>
         </div>
@@ -237,7 +233,7 @@ export function QRReceiver() {
           <div className="overflow-hidden rounded-lg bg-brand text-[var(--color-on-primary)]">
             <div className="px-6 pb-6 pt-5">
               <p className="text-center text-[10px] uppercase tracking-[.14em] text-[var(--color-sidebar-muted)]">
-                PaperBridge Offline Receiver
+                {dict.paperbridge.receiveTitle}
               </p>
               <div className="scanner-frame my-4 flex flex-col items-center justify-center gap-4 px-4 py-8 text-center">
                 <Camera
@@ -246,7 +242,7 @@ export function QRReceiver() {
                   className="text-[var(--color-sidebar-muted)]"
                 />
                 <p className="text-xs leading-relaxed text-[var(--color-on-primary)]">
-                  Scan a QR code from another screen or paper, or select a saved image file.
+                  {dict.paperbridge.receiveSubtitle}
                 </p>
               </div>
             </div>
@@ -259,7 +255,7 @@ export function QRReceiver() {
                 className="button-secondary flex-col border-transparent py-3 hover:bg-[var(--color-sidebar-active)]"
               >
                 <Camera size={20} />
-                <span>Use camera</span>
+                <span>{dict.paperbridge.useCameraButton}</span>
               </button>
               <button
                 type="button"
@@ -268,7 +264,7 @@ export function QRReceiver() {
                 className="button-secondary flex-col border-transparent py-3 hover:bg-[var(--color-sidebar-active)]"
               >
                 <FileUp size={20} />
-                <span>Upload image</span>
+                <span>{dict.paperbridge.uploadImageButton}</span>
               </button>
             </div>
           </div>
@@ -284,14 +280,15 @@ export function QRReceiver() {
 
           {isProcessing && (
             <p className="mt-4 text-center text-xs text-muted" role="status">
-              Analyzing QR code image…
+              {dict.paperbridge.analyzingImage}
             </p>
           )}
 
           {!isSecure && (
             <p className="mt-4 text-xs leading-relaxed text-muted">
               Note: When accessed via a LAN IP without HTTPS, browsers restrict live camera access.
-              Use <strong>Upload image</strong> to import tasks across devices seamlessly.
+              Use <strong>{dict.paperbridge.uploadImageButton}</strong> to import tasks across
+              devices seamlessly.
             </p>
           )}
         </div>
@@ -302,7 +299,7 @@ export function QRReceiver() {
         <div>
           <div className="overflow-hidden rounded-lg bg-brand p-4 text-[var(--color-on-primary)]">
             <div className="mb-3 flex items-center justify-between text-xs text-[var(--color-sidebar-muted)]">
-              <span>Align QR code within frame</span>
+              <span>{dict.paperbridge.alignFrameNotice}</span>
               {cameraActive && (
                 <span className="flex items-center gap-1.5 text-accent">
                   <span className="h-2 w-2 rounded-full bg-action animate-pulse" />
@@ -313,7 +310,7 @@ export function QRReceiver() {
 
             {cameraError ? (
               <div className="rounded-md bg-surface p-4 text-xs text-brand" role="alert">
-                <p className="font-semibold text-danger">Camera Notice</p>
+                <p className="font-semibold text-danger">{dict.paperbridge.cameraNoticeTitle}</p>
                 <p className="mt-1 leading-relaxed text-muted">{cameraError}</p>
                 <div className="mt-4 flex gap-2">
                   <button
@@ -322,10 +319,10 @@ export function QRReceiver() {
                     className="button-primary text-xs"
                   >
                     <FileUp size={15} />
-                    Upload QR Image
+                    {dict.paperbridge.uploadImageButton}
                   </button>
                   <button type="button" onClick={handleReset} className="button-secondary text-xs">
-                    Back
+                    {dict.form.cancelButton}
                   </button>
                 </div>
               </div>
@@ -343,7 +340,7 @@ export function QRReceiver() {
               onClick={handleReset}
               className="button-secondary w-full justify-center"
             >
-              Cancel Camera
+              {dict.paperbridge.cancelCamera}
             </button>
             <button
               type="button"
@@ -351,7 +348,7 @@ export function QRReceiver() {
               className="button-secondary w-full justify-center"
             >
               <FileUp size={16} />
-              Upload Image
+              {dict.paperbridge.uploadImageButton}
             </button>
           </div>
 
@@ -371,66 +368,88 @@ export function QRReceiver() {
         <div>
           <div className="mb-4 flex items-center gap-2 text-brand">
             <SquareCheck size={20} className="text-brand" />
-            <h2 className="text-base font-semibold">QR Decoded Successfully</h2>
+            <h2 className="text-base font-semibold">{dict.paperbridge.decodedSuccessTitle}</h2>
           </div>
 
           <div className="rounded-lg border border-line bg-surface p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <span className="text-[11px] font-medium uppercase tracking-wider text-muted">
-                  {actionLabels[pendingEnvelope.payload.action]}
+                  {pendingEnvelope.payload.instruction
+                    ? (dict.actions[pendingEnvelope.payload.instruction.actionCode] ??
+                      pendingEnvelope.payload.instruction.actionCode)
+                    : (dict.legacyActions[pendingEnvelope.payload.action] ??
+                      actionLabels[pendingEnvelope.payload.action])}
                 </span>
                 <h3 className="mt-1 text-base font-semibold leading-snug">
-                  {pendingEnvelope.payload.title}
+                  {pendingEnvelope.payload.instruction
+                    ? formatTask(pendingEnvelope.payload.instruction)
+                    : pendingEnvelope.payload.title}
                 </h3>
               </div>
               <PriorityIndicator priority={pendingEnvelope.payload.priority} />
             </div>
 
-            {pendingEnvelope.payload.description && (
-              <p className="mt-3 text-xs leading-relaxed text-muted">
-                {pendingEnvelope.payload.description}
-              </p>
+            {/* If structured instruction has notes, or payload has description */}
+            {(pendingEnvelope.payload.instruction?.additionalNotes ||
+              pendingEnvelope.payload.description) && (
+              <div className="mt-3">
+                <p className="text-xs leading-relaxed text-muted">
+                  {pendingEnvelope.payload.instruction?.additionalNotes ??
+                    pendingEnvelope.payload.description}
+                </p>
+                {pendingEnvelope.payload.instruction?.additionalNotes && (
+                  <span className="mt-1 block text-[10px] text-muted">
+                    {dict.form.untranslatedNoteNotice}
+                  </span>
+                )}
+              </div>
             )}
 
             <dl className="mt-4 grid grid-cols-2 gap-2 border-t border-line pt-3 text-xs">
               <div>
-                <dt className="text-muted">Quantity</dt>
+                <dt className="text-muted">{dict.form.quantityLabel}</dt>
                 <dd className="mt-0.5 font-medium">
                   {pendingEnvelope.payload.quantity !== undefined
-                    ? `${pendingEnvelope.payload.quantity} ${pendingEnvelope.payload.unit ?? ''}`
+                    ? `${pendingEnvelope.payload.quantity} ${
+                        pendingEnvelope.payload.instruction?.unitCode
+                          ? (dict.units[pendingEnvelope.payload.instruction.unitCode] ??
+                            pendingEnvelope.payload.instruction.unitCode)
+                          : (pendingEnvelope.payload.unit ?? '')
+                      }`
                     : 'Unspecified'}
                 </dd>
               </div>
               <div>
-                <dt className="text-muted">Status</dt>
+                <dt className="text-muted">{dict.form.statusLabel}</dt>
                 <dd className="mt-0.5 font-medium">
-                  {statusLabels[pendingEnvelope.payload.status]}
+                  {dict.statuses[pendingEnvelope.payload.status] ?? pendingEnvelope.payload.status}
                 </dd>
               </div>
               <div className="col-span-2">
-                <dt className="text-muted">Location</dt>
-                <dd className="mt-0.5 font-medium">{pendingEnvelope.payload.location}</dd>
+                <dt className="text-muted">{dict.form.locationLabel}</dt>
+                <dd className="mt-0.5 font-medium">
+                  {pendingEnvelope.payload.instruction?.locationText ??
+                    pendingEnvelope.payload.location}
+                </dd>
               </div>
               <div className="col-span-2">
-                <dt className="text-muted">Sender Device</dt>
+                <dt className="text-muted">{dict.task.deviceLabel}</dt>
                 <dd className="mt-0.5 break-all font-mono text-[10px] text-muted">
                   {pendingEnvelope.senderId}
                 </dd>
               </div>
               <div className="col-span-2">
-                <dt className="text-muted">Task Created</dt>
+                <dt className="text-muted">{dict.task.createdLabel}</dt>
                 <dd className="mt-0.5 text-[11px] text-muted">
-                  {formatDateTime(pendingEnvelope.payload.createdAt)} · Revision{' '}
+                  {formatDateTime(pendingEnvelope.payload.createdAt)} · {dict.task.revision}{' '}
                   {pendingEnvelope.payload.revision}
                 </dd>
               </div>
             </dl>
           </div>
 
-          <p className="mt-3 text-xs text-muted">
-            This task will be saved to this device's offline IndexedDB storage.
-          </p>
+          <p className="mt-3 text-xs text-muted">{dict.settings.offlineIndicatorDescription}</p>
 
           <div className="mt-5 grid grid-cols-2 gap-3">
             <button
@@ -439,7 +458,7 @@ export function QRReceiver() {
               disabled={isProcessing}
               className="button-secondary justify-center"
             >
-              Cancel
+              {dict.form.cancelButton}
             </button>
             <button
               type="button"
@@ -448,7 +467,7 @@ export function QRReceiver() {
               className="button-primary justify-center"
             >
               <CheckCircle2 size={17} />
-              {isProcessing ? 'Importing…' : 'Import Task'}
+              {isProcessing ? dict.paperbridge.importingButton : dict.paperbridge.importTaskButton}
             </button>
           </div>
         </div>
@@ -462,17 +481,18 @@ export function QRReceiver() {
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-surface)] text-brand">
                 <CheckCircle2 size={32} />
               </div>
-              <h2 className="mt-3 text-base font-semibold">Task Imported Successfully</h2>
+              <h2 className="mt-3 text-base font-semibold">
+                {dict.paperbridge.importedSuccessTitle}
+              </h2>
               <p className="mt-1 text-xs leading-relaxed text-muted">
-                "{importResult.task.title}" is now available in your local tasks database and
-                dashboard.
+                {dict.paperbridge.importedSuccessMessage(importResult.task.title)}
               </p>
               <div className="mt-6 flex flex-col gap-2.5">
                 <Link
                   to={`/tasks/${importResult.task.id}`}
                   className="button-primary justify-center text-center no-underline"
                 >
-                  View Task Details
+                  {dict.paperbridge.viewTaskDetailsButton}
                 </Link>
                 <button
                   type="button"
@@ -480,7 +500,7 @@ export function QRReceiver() {
                   className="button-secondary justify-center"
                 >
                   <RotateCcw size={16} />
-                  Scan Another Code
+                  {dict.paperbridge.scanAnotherButton}
                 </button>
               </div>
             </div>
@@ -491,14 +511,16 @@ export function QRReceiver() {
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-surface)] text-warning">
                 <CheckCircle2 size={32} />
               </div>
-              <h2 className="mt-3 text-base font-semibold">Task Already Present</h2>
+              <h2 className="mt-3 text-base font-semibold">
+                {dict.paperbridge.alreadyPresentTitle}
+              </h2>
               <p className="mt-1 text-xs leading-relaxed text-muted">{importResult.message}</p>
               <div className="mt-6 flex flex-col gap-2.5">
                 <Link
                   to={`/tasks/${importResult.task.id}`}
                   className="button-primary justify-center text-center no-underline"
                 >
-                  View Existing Task
+                  {dict.paperbridge.viewExistingButton}
                 </Link>
                 <button
                   type="button"
@@ -506,7 +528,7 @@ export function QRReceiver() {
                   className="button-secondary justify-center"
                 >
                   <RotateCcw size={16} />
-                  Scan Another Code
+                  {dict.paperbridge.scanAnotherButton}
                 </button>
               </div>
             </div>
@@ -517,7 +539,7 @@ export function QRReceiver() {
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-surface)] text-danger">
                 <XCircle size={32} />
               </div>
-              <h2 className="mt-3 text-base font-semibold">Import Conflict</h2>
+              <h2 className="mt-3 text-base font-semibold">{dict.paperbridge.conflictTitle}</h2>
               <p className="mt-1 text-xs leading-relaxed text-muted">{importResult.message}</p>
               <div className="mt-6 flex flex-col gap-2.5">
                 {importResult.code === 'REVISION_CONFLICT' && (
@@ -525,7 +547,7 @@ export function QRReceiver() {
                     to={`/tasks/${importResult.task.id}`}
                     className="button-secondary justify-center text-center no-underline"
                   >
-                    View Local Task
+                    {dict.paperbridge.viewExistingButton}
                   </Link>
                 )}
                 <button
@@ -534,7 +556,7 @@ export function QRReceiver() {
                   className="button-primary justify-center"
                 >
                   <RotateCcw size={16} />
-                  Scan Another Code
+                  {dict.paperbridge.scanAnotherButton}
                 </button>
               </div>
             </div>

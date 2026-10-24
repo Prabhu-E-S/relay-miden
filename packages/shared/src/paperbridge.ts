@@ -6,6 +6,7 @@ import {
   TaskStatusSchema,
   type Task,
 } from './tasks.js';
+import { StructuredTaskInstructionSchema } from './multilingual.js';
 
 export const PaperBridgeProtocolIdentifier = 'RELAY_MIDEN_PAPERBRIDGE' as const;
 export const PAPERBRIDGE_PROTOCOL_VERSION = 1 as const;
@@ -35,6 +36,7 @@ export const PaperBridgeTaskPayloadSchema = z
     updatedAt: z.iso.datetime({ offset: true }),
     createdBy: z.string().trim().min(1).max(DEVICE_ID_MAX),
     revision: z.number().int().positive(),
+    instruction: StructuredTaskInstructionSchema.optional(),
   })
   .superRefine((data, ctx) => {
     if (data.quantity !== undefined && !data.unit) {
@@ -179,6 +181,7 @@ export async function createPaperBridgeEnvelope(
     updatedAt: validatedTask.updatedAt,
     createdBy: validatedTask.createdBy,
     revision: validatedTask.revision,
+    ...(validatedTask.instruction ? { instruction: validatedTask.instruction } : {}),
   };
 
   const parsedPayload = PaperBridgeTaskPayloadSchema.safeParse(payload);

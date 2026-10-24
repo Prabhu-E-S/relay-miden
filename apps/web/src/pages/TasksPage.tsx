@@ -20,7 +20,7 @@ const priorities: readonly (TaskPriority | 'all')[] = ['all', 'low', 'medium', '
 const sorts: readonly TaskSort[] = ['recently_updated', 'newest', 'oldest', 'priority'];
 
 export function TasksPage() {
-  const { t } = useLanguage();
+  const { t, dict } = useLanguage();
   const [search, setSearch] = useState('');
   const [params, setParams] = useSearchParams();
   const tasks = useLiveQuery(() => taskRepository.getAllTasks(), []);
@@ -57,7 +57,7 @@ export function TasksPage() {
         description="Search, filter, and manage the tasks stored on this device."
         action={
           <Link to="/create" className="button-primary">
-            <Plus size={17} /> Create Task
+            <Plus size={17} /> {t.createTask}
           </Link>
         }
       />
@@ -68,7 +68,7 @@ export function TasksPage() {
           <input
             type="search"
             className="control bg-surface pl-10"
-            placeholder="Search title, location, or description…"
+            placeholder={dict.task.filterSearchPlaceholder}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -80,12 +80,12 @@ export function TasksPage() {
             value={status}
             onChange={(event) => setFilter('status', event.target.value)}
           >
-            <option value="all">All statuses</option>
-            <option value="active">Active tasks</option>
-            <option value="pending">Pending</option>
-            <option value="acknowledged">Acknowledged</option>
-            <option value="in_progress">In progress</option>
-            <option value="completed">Completed</option>
+            <option value="all">{dict.task.filterAllStatus}</option>
+            <option value="active">{dict.task.filterActiveStatus}</option>
+            <option value="pending">{dict.statuses.pending}</option>
+            <option value="acknowledged">{dict.statuses.acknowledged}</option>
+            <option value="in_progress">{dict.statuses.in_progress}</option>
+            <option value="completed">{dict.statuses.completed}</option>
           </select>
         </label>
         <label>
@@ -95,11 +95,11 @@ export function TasksPage() {
             value={priority}
             onChange={(event) => setFilter('priority', event.target.value)}
           >
-            <option value="all">All priorities</option>
-            <option value="urgent">Urgent</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
+            <option value="all">{dict.task.filterAllPriority}</option>
+            <option value="urgent">{dict.priorities.urgent}</option>
+            <option value="high">{dict.priorities.high}</option>
+            <option value="medium">{dict.priorities.medium}</option>
+            <option value="low">{dict.priorities.low}</option>
           </select>
         </label>
         <label>
