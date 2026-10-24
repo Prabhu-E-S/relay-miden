@@ -1,9 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { PageHeader } from '../components/ui/PageHeader';
 import { EmptyState } from '../components/ui/EmptyState';
-import { QRDisplayPlaceholder } from '../components/ui/QRDisplayPlaceholder';
+import { QRDisplay } from '../components/qr/QRDisplay';
 import { TaskSummary } from '../components/tasks/TaskSummary';
 import { taskRepository } from '../db/task-repository';
 import { useLanguage } from '../hooks/use-language';
@@ -12,8 +12,20 @@ export function SendPage() {
   const { t } = useLanguage();
   const [params, setParams] = useSearchParams();
   const tasks = useLiveQuery(() => taskRepository.getAllTasks(), []);
+  const [deviceId, setDeviceId] = useState<string>();
   const requestedId = params.get('task');
   const task = tasks?.find((item) => item.id === requestedId) ?? tasks?.[0];
+
+  useEffect(() => {
+    let active = true;
+    taskRepository.getDeviceId().then(
+      (value) => active && setDeviceId(value),
+      () => active && setDeviceId(undefined),
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!requestedId && task) setParams({ task: task.id }, { replace: true });
@@ -23,7 +35,7 @@ export function SendPage() {
     <>
       <PageHeader
         title={t.send}
-        description="PaperBridge export is planned for Phase 3. This screen only selects a real local task for the existing placeholder."
+        description="Transfer tasks across devices via offline QR codes. No internet, Wi-Fi, or cloud server required."
       />
       {!tasks ? (
         <div className="panel max-w-md p-5" role="status">
@@ -46,13 +58,21 @@ export function SendPage() {
             </select>
           </label>
           <TaskSummary task={task} />
-          <QRDisplayPlaceholder />
+          {deviceId ? (
+            <QRDisplay task={task} deviceId={deviceId} />
+          ) : (
+            <div className="mt-6 border-t border-line pt-6 text-center text-xs text-muted">
+              Loading device identity…
+            </div>
+          )}
         </section>
       ) : (
         <div className="max-w-md">
           <EmptyState
             title="No local task to share"
-            description="Create a task first. QR generation remains disabled until Phase 3."
+            description="Create a task first to generate a PaperBridge QR code."
+            actionLabel="Create a task"
+            actionTo="/create"
           />
         </div>
       )}
