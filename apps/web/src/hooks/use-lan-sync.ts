@@ -1,10 +1,27 @@
 import { useState, useEffect, useCallback } from 'react';
-import { lanSyncClient, type LanConnectionState } from '../services/lan';
+import { useLiveQuery } from 'dexie-react-hooks';
+import {
+  lanSyncClient,
+  getOutboxStats,
+  type LanConnectionState,
+  type OutboxStats,
+} from '../services/lan';
+
+const DEFAULT_OUTBOX_STATS: OutboxStats = {
+  pending: 0,
+  inFlight: 0,
+  acknowledged: 0,
+  blocked: 0,
+  failed: 0,
+  total: 0,
+};
 
 export function useLanSync() {
   const [state, setState] = useState<LanConnectionState>(lanSyncClient.getState());
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  const outboxStats = useLiveQuery(() => getOutboxStats(), [], DEFAULT_OUTBOX_STATS);
 
   useEffect(() => {
     return lanSyncClient.subscribe((next) => {
@@ -22,6 +39,22 @@ export function useLanSync() {
     lanSyncClient.disconnect();
   }, []);
 
+  const reconnectNow = useCallback(async () => {
+    setSyncMessage(null);
+    return lanSyncClient.reconnectNow();
+  }, []);
+
+  const retryBlockedAndFailed = useCallback(async () => {
+    setSyncMessage(null);
+    const count = await lanSyncClient.retryBlockedAndFailed();
+    if (count > 0) {
+      setSyncMessage(`Re-queued ${count} blocked or failed operation(s).`);
+    } else {
+      setSyncMessage('No blocked or failed operations to retry.');
+    }
+    return count;
+  }, []);
+
   const setServerUrl = useCallback((url: string) => {
     lanSyncClient.setServerUrl(url);
   }, []);
@@ -37,7 +70,7 @@ export function useLanSync() {
       const res = await lanSyncClient.syncNow();
       if (res.success) {
         setSyncMessage(
-          `Synchronized successfully (${res.operationsApplied ?? 0} operations applied).`,
+          `Synchronized successfully (${res.operationsApplied ?? 0} operations applied, ${res.outboxReplayed ?? 0} outbox replayed).`,
         );
       } else {
         setSyncMessage(res.error ?? 'Sync failed.');
@@ -56,11 +89,22 @@ export function useLanSync() {
     lastError: state.lastError,
     lastSyncAt: state.lastSyncAt,
     serverSequence: state.serverSequence,
+    reconnectAttempt: state.reconnectAttempt,
+    nextRetrySeconds: state.nextRetrySeconds,
+    outboxStats,
+    pendingCount: outboxStats.pending,
+    blockedCount: outboxStats.blocked,
+    failedCount: outboxStats.failed,
+    inFlightCount: outboxStats.inFlight,
+    acknowledgedCount: outboxStats.acknowledged,
     isConnected: state.status === 'CONNECTED' || state.status === 'SYNCING',
+    isReconnecting: state.status === 'RECONNECTING',
     isSyncing,
     syncMessage,
     connect,
     disconnect,
+    reconnectNow,
+    retryBlockedAndFailed,
     setServerUrl,
     setSessionToken,
     syncNow,

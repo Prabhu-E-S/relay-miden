@@ -8,6 +8,7 @@ import {
   classifyIncomingOperation,
   completeTaskChanges,
   createPaperBridgeV2Envelope,
+  generateUuid,
   taskChanges,
   taskStateHash,
   verifyEnvelopeChecksum,
@@ -446,7 +447,7 @@ export class SyncRepository {
       .reverse()
       .find((op) => op.revision === current.revision);
     const operation = TaskOperationSchema.parse({
-      operationId: crypto.randomUUID(),
+      operationId: generateUuid(),
       taskId: current.id,
       actorId,
       operationType: 'TASK_RESOLVE',
@@ -460,7 +461,12 @@ export class SyncRepository {
     });
     await this.database.transaction(
       'rw',
-      [this.database.tasks, this.database.operations, this.database.conflicts],
+      [
+        this.database.tasks,
+        this.database.operations,
+        this.database.conflicts,
+        this.database.outbox,
+      ],
       async () => {
         const latest = await this.database.tasks.get(current.id);
         if (canonicalJsonStringify(latest) !== canonicalJsonStringify(current))
@@ -471,6 +477,14 @@ export class SyncRepository {
           resolvedAt: new Date().toISOString(),
           resolution: decision,
           resolutionOperationId: operation.operationId,
+        });
+        await this.database.outbox.add({
+          operationId: operation.operationId,
+          taskId: current.id,
+          originDeviceId: actorId,
+          status: 'PENDING',
+          attemptCount: 0,
+          createdAt: operation.timestamp,
         });
       },
     );

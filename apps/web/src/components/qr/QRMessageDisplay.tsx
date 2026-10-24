@@ -53,7 +53,7 @@ export function QRMessageDisplay({
       )}
       {url && (
         <>
-          <div className="mx-auto w-full max-w-72 rounded-lg border border-line bg-white p-4">
+          <div className="mx-auto w-full max-w-[26rem] rounded-lg border border-line bg-white p-4">
             <img
               src={url}
               alt={`${label} PaperBridge QR code`}

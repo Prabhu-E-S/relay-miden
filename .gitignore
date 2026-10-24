@@ -36,3 +36,8 @@ Desktop.ini
 *.swo
 *.sln
 *.suo
+certs/
+*.pem
+*.crt
+*.key
+dev-dist/

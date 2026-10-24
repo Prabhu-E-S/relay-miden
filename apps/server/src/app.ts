@@ -1,4 +1,6 @@
-import { createServer, type Server as HTTPServer } from 'node:http';
+import { createServer as createHttpServer, type Server as HTTPServer } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
+import fs from 'node:fs';
 import express, { type Express } from 'express';
 import cors from 'cors';
 import type { DatabaseSync } from 'node:sqlite';
@@ -53,7 +55,16 @@ export function createServerInstance(overrides: Partial<ServerConfig> = {}): Ser
   }
 
   const syncService = new SyncService(db);
-  const httpServer = createServer(app);
+  const isHttps = Boolean(config.httpsKey && config.httpsCert);
+  const httpServer = isHttps
+    ? (createHttpsServer(
+        {
+          key: fs.readFileSync(config.httpsKey!),
+          cert: fs.readFileSync(config.httpsCert!),
+        },
+        app,
+      ) as unknown as HTTPServer)
+    : createHttpServer(app);
   const io = registerSocketHandlers(httpServer, syncService, config, serverDeviceId);
 
   const close = async () => {

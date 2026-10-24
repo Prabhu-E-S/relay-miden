@@ -99,11 +99,11 @@ export function QRDisplay({ task, deviceId }: { task: Task; deviceId: string }) 
         </div>
       ) : qrDataUrl && encoding ? (
         <div>
-          <div className="mx-auto flex w-full max-w-72 flex-col items-center rounded-lg border border-line bg-white p-4 shadow-none">
+          <div className="mx-auto flex w-full max-w-[26rem] flex-col items-center rounded-lg border border-line bg-white p-4 shadow-none">
             <img
               src={qrDataUrl}
               alt={`PaperBridge QR code for task: ${displayTitle}`}
-              className="aspect-square w-full max-w-64 object-contain"
+              className="aspect-square w-full max-w-[22rem] object-contain"
             />
             <div className="mt-3 flex w-full items-center justify-between text-[11px] text-muted">
               <span>{dict.paperbridge.bytesLabel(encoding.byteSize)}</span>

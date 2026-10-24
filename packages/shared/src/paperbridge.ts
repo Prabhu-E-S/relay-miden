@@ -7,6 +7,7 @@ import {
   type Task,
 } from './tasks.js';
 import { StructuredTaskInstructionSchema } from './multilingual.js';
+import { generateUuid } from './uuid.js';
 
 export const PaperBridgeProtocolIdentifier = 'RELAY_MIDEN_PAPERBRIDGE' as const;
 export const PAPERBRIDGE_PROTOCOL_VERSION = 1 as const;
@@ -194,7 +195,7 @@ export async function createPaperBridgeEnvelope(
   const envelopeWithoutChecksum: Omit<PaperBridgeEnvelope, 'checksum'> = {
     protocol: PaperBridgeProtocolIdentifier,
     version: PAPERBRIDGE_PROTOCOL_VERSION,
-    messageId: options.messageId ?? crypto.randomUUID(),
+    messageId: options.messageId ?? generateUuid(),
     messageType: 'TASK_CREATE',
     senderId,
     createdAt: options.now ?? new Date().toISOString(),

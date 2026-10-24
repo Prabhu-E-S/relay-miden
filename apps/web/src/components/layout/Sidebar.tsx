@@ -36,7 +36,7 @@ export function Sidebar() {
             Tasks are saved locally in IndexedDB.
           </p>
           <p className="mt-3 text-[10px] uppercase tracking-[.13em] text-[var(--color-sidebar-muted)]">
-            Phase 05 · QR task updates
+            Phase 08 · PWA & Offline Launch
           </p>
         </div>
       </div>

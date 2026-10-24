@@ -130,5 +130,38 @@ export const LanServerErrorSchema = z
   .strict();
 export type LanServerError = z.infer<typeof LanServerErrorSchema>;
 
+export const OutboxStatusSchema = z.enum([
+  'PENDING',
+  'IN_FLIGHT',
+  'ACKNOWLEDGED',
+  'BLOCKED',
+  'FAILED',
+]);
+export type OutboxStatus = z.infer<typeof OutboxStatusSchema>;
+
+export const OutboxEntrySchema = z
+  .object({
+    operationId: z.string().uuid(),
+    taskId: z.string().uuid(),
+    originDeviceId: z.string().uuid(),
+    status: OutboxStatusSchema,
+    attemptCount: z.number().int().nonnegative(),
+    lastAttemptAt: z.string().datetime({ offset: true }).optional(),
+    nextRetryAt: z.string().datetime({ offset: true }).optional(),
+    lastError: z.string().optional(),
+    createdAt: z.string().datetime({ offset: true }),
+    acknowledgedAt: z.string().datetime({ offset: true }).optional(),
+    serverSequence: z.number().int().positive().optional(),
+  })
+  .strict();
+export type OutboxEntry = z.infer<typeof OutboxEntrySchema>;
+
 export type LanConnectionStatus =
-  'NOT_CONFIGURED' | 'CONNECTING' | 'CONNECTED' | 'SYNCING' | 'DISCONNECTED' | 'ERROR';
+  | 'NOT_CONFIGURED'
+  | 'CONNECTING'
+  | 'REGISTERING'
+  | 'CONNECTED'
+  | 'SYNCING'
+  | 'DISCONNECTED'
+  | 'RECONNECTING'
+  | 'ERROR';

@@ -1,3 +1,4 @@
+import type { OutboxEntry, OutboxStatus } from '@relay-miden/shared';
 import { LanOperationBroadcastSchema, type LanConnectionStatus } from './protocol';
 import { lanConnection, type LanConnectionState } from './connection';
 import {
@@ -7,6 +8,12 @@ import {
   getUnsynchronizedOperations,
   recordServerAcceptance,
 } from './sync';
+import {
+  getOutboxStats,
+  getOutboxEntries,
+  retryBlockedAndFailed,
+  type OutboxStats,
+} from './outbox';
 import { taskRepository } from '../../db/task-repository';
 
 export class LanSyncClient {
@@ -19,12 +26,12 @@ export class LanSyncClient {
   }
 
   private setupLocalOperationListener(): void {
-    this.removeOpListener = taskRepository.addOperationListener(async (operation) => {
+    this.removeOpListener = taskRepository.addOperationListener(async () => {
       if (lanConnection.isConnected()) {
         try {
-          await submitLocalOperation(operation.operationId);
+          await this.syncNow();
         } catch (err) {
-          console.error('Failed to submit local operation to LAN:', err);
+          console.error('Failed to trigger synchronization on local operation:', err);
         }
       }
     });
@@ -36,7 +43,7 @@ export class LanSyncClient {
     lanConnection.subscribe(async (state) => {
       if (state.status === 'CONNECTED' && prevStatus !== 'CONNECTED') {
         this.setupSocketListeners();
-        // Trigger initial sync upon connection
+        // Trigger initial catch-up and outbox replay upon connection
         void this.syncNow();
       }
       prevStatus = state.status;
@@ -71,12 +78,16 @@ export class LanSyncClient {
     return lanConnection.subscribe(listener);
   }
 
-  async connect(url?: string, token?: string): Promise<boolean> {
-    return lanConnection.connect(url, token);
+  async connect(url?: string, token?: string, customDeviceId?: string): Promise<boolean> {
+    return lanConnection.connect(url, token, customDeviceId);
   }
 
   disconnect(): void {
     lanConnection.disconnect();
+  }
+
+  async reconnectNow(): Promise<boolean> {
+    return lanConnection.reconnectNow();
   }
 
   setServerUrl(url: string): void {
@@ -87,7 +98,12 @@ export class LanSyncClient {
     lanConnection.setSessionToken(token);
   }
 
-  async syncNow(): Promise<{ success: boolean; operationsApplied?: number; error?: string }> {
+  async syncNow(): Promise<{
+    success: boolean;
+    operationsApplied?: number | undefined;
+    outboxReplayed?: number | undefined;
+    error?: string | undefined;
+  }> {
     if (!lanConnection.isConnected()) {
       return { success: false, error: 'LAN server is not connected.' };
     }
@@ -99,7 +115,11 @@ export class LanSyncClient {
     this.isSyncing = true;
     try {
       const result = await requestLanSync();
-      return { success: true, operationsApplied: result.operationsApplied };
+      return {
+        success: true,
+        operationsApplied: result.operationsApplied,
+        outboxReplayed: result.outboxReplayed,
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Synchronization failed.';
       return { success: false, error: msg };
@@ -108,7 +128,22 @@ export class LanSyncClient {
     }
   }
 
-  // Phase 7 Readiness Interfaces
+  async getOutboxStats(): Promise<OutboxStats> {
+    return getOutboxStats();
+  }
+
+  async getOutboxEntries(status?: OutboxStatus): Promise<OutboxEntry[]> {
+    return getOutboxEntries(status);
+  }
+
+  async retryBlockedAndFailed(): Promise<number> {
+    const count = await retryBlockedAndFailed();
+    if (count > 0 && lanConnection.isConnected()) {
+      void this.syncNow();
+    }
+    return count;
+  }
+
   async getUnsynchronizedOperations() {
     return getUnsynchronizedOperations();
   }

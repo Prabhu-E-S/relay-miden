@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar';
 import { MobileHeader } from './MobileHeader';
 import { MobileBottomNav } from './MobileBottomNav';
 import { LanguageSelector } from '../ui/LanguageSelector';
+import { UpdateNotification } from '../pwa/UpdateNotification';
 
 export function AppShell() {
   const { pathname } = useLocation();
@@ -44,12 +45,13 @@ export function AppShell() {
               </span>
             </div>
           </div>
+          <UpdateNotification />
           <main id="main-content">
             <Outlet />
           </main>
           <footer className="mt-7 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4 text-[10px] text-muted">
             <span>Relay Miden · When networks fail, communication shouldn’t.</span>
-            <span>Phase 5 — QR task updates</span>
+            <span>Phase 8 — PWA & Offline Launch</span>
           </footer>
         </div>
         <MobileBottomNav />

@@ -6,9 +6,41 @@ Relay Miden is an offline-first, multilingual task-coordination project for the 
 
 ## Current status
 
-**Phase 6 implemented and verified on 25 October 2026.** Relay Miden now provides real-time local network synchronization over Wi-Fi, mobile hotspots, or local switches. An Express and Socket.IO coordinator backed by host-local SQLite persistence (`node:sqlite`) broadcasts task operations in real time. The browser-side LAN sync service reuses the Phase 5 causal ancestry and conflict detection engine, allowing multiple devices to synchronize without public internet access. Phase 5's PaperBridge QR transfers, Phase 4's multilingual rendering, and Phase 2's offline IndexedDB CRUD remain 100% operational.
+**Phase 8 implemented and verified on 25 October 2026.** Relay Miden is now an installable Progressive Web App (PWA) with complete offline launch capabilities and secure LAN access for mobile devices. Static application shell assets (HTML, CSS, JavaScript, local DM Sans fonts, and PNG icons) are precached locally by a Workbox Service Worker, allowing the application to launch and navigate without network connectivity. Tasks, operation histories, and outbox queues persist durably in IndexedDB and are never flushed or cleared during application updates. The application supports installation on Android, Chromium, Desktop, and iOS (Safari Add to Home Screen) in standalone display mode. A non-intrusive update management system notifies users when new application versions are ready and preserves active user edits. Secure-context development tooling (`npm run cert:gen`, `npm run dev:https`) provides multi-IP SAN TLS certificates for mobile camera scanning and secure LAN synchronization over Socket.IO. Phases 1–7 remain 100% operational.
 
 ### Implemented
+
+- **Progressive Web App, Offline Launch, Installability & Secure LAN (Phase 8)**:
+  - **W3C Web App Manifest**: Full specification compliance (`/manifest.webmanifest`) with `name: "Relay Miden"`, `short_name: "Relay Miden"`, `display: "standalone"`, `theme_color: "#004225"`, and `background_color: "#F5F5DC"`.
+  - **Installable Icon Suite**: 192×192 standard PNG, 512×512 high-resolution PNG, 512×512 maskable PNG (with 20% safe-padding margin for Android squircles), 180×180 Apple touch icon, and multi-size web favicons generated directly from the brand SVG geometry.
+  - **Workbox Service Worker Precaching**: Precaches 32 essential application shell assets (1,417 KiB total) including HTML, CSS, JavaScript bundles, local fonts, and icons.
+  - **Client-Side Navigation Fallback**: Returns `/index.html` for offline navigation while strictly excluding `/api/`, `/socket.io/`, and `/health/` via a navigation denylist.
+  - **Data Isolation & Storage Safety**: User tasks, operations, and Phase 7 outbox records remain strictly isolated in IndexedDB. Cache Storage is never used for task records, and local data is never cleared during updates.
+  - **PWA Installation Controls**: Intercepts `beforeinstallprompt` on Chromium/Android, provides user-initiated installation in Settings, respects prompt dismissal, detects standalone display mode, and displays iOS Safari Add to Home Screen instructions.
+  - **Safe Non-Intrusive Updates**: Background service worker updates display a persistent `<UpdateNotification />` banner guaranteeing local data safety and allowing manual reload activation.
+  - **Secure LAN HTTPS Tooling**: `scripts/generate-dev-cert.mjs` detects local IPv4 interfaces via `os.networkInterfaces()` and generates multi-IP SAN TLS certificates via `mkcert` or OpenSSL.
+  - **Secure LAN Server (`apps/server`)**: Conditional HTTPS and WSS Socket.IO support when TLS keys and certificates are supplied, preventing mixed-content blocking.
+  - **Mobile Camera Scanning Support**: Enables `navigator.mediaDevices.getUserMedia` live camera scanning on mobile phones connecting to the host machine over LAN Wi-Fi.
+  - **Dedicated Setup Guide**: [docs/pwa-offline-setup.md](docs/pwa-offline-setup.md) detailing Windows development setup, `ipconfig` host discovery, certificate installation, and mobile testing.
+
+- **LAN HTTP mobile-storage compatibility repair (25 October 2026)**:
+  - Browser-generated UUIDs now use `crypto.randomUUID()` when available and securely fall back to `crypto.getRandomValues()` on unencrypted LAN HTTP origins. This allows a phone opening Relay Miden through a same-Wi-Fi address to create its anonymous IndexedDB device identity.
+  - The local-storage screen now exposes the underlying database error when a browser still blocks IndexedDB, without clearing any data.
+
+- **Mobile camera QR scanning reliability repair (25 October 2026)**:
+  - The in-app scanner now uses the full rear-camera frame at a preferred 1280×720 resolution instead of a 240px decode crop, and restricts detection to QR codes. Its camera selector uses the `html5-qrcode` required single `facingMode` constraint; resolution is supplied through video constraints.
+  - Task, update, and acknowledgment QR displays are larger on laptop and desktop layouts so their signed JSON envelopes retain readable module sizes for a phone camera.
+
+- **Durable Offline Queue, Automatic Reconnection & Recovery (Phase 7)**:
+  - **Durable Outbox Queue (IndexedDB Version 4)**: Persistent `outbox` table in Dexie with compound indices. Every local task operation (`TASK_CREATE`, `TASK_UPDATE`, `TASK_DELETE`, `TASK_RESOLVE`) commits atomically in the same database transaction as the task and operation log.
+  - **Queue State Machine**: Strict transitions (`PENDING` -> `IN_FLIGHT` -> `ACKNOWLEDGED` / `BLOCKED` / `FAILED`). Interrupted `IN_FLIGHT` operations recover automatically to `PENDING` on database open.
+  - **Automatic LAN Reconnection**: Autonomous exponential backoff (1s, 2s, 4s, 8s, 16s, capped at 30s) with $\pm 20\%$ random jitter to prevent reconnect storms. Browser `online` and `visibilitychange` lifecycle awareness.
+  - **Causal Operation Replay**: Strict parent-first dependency ordering ensures task creations and base revisions replay before dependent edits. Missing dependencies transition operations to `BLOCKED` without infinite retry loops.
+  - **Idempotent Replay & Lost Acknowledgment Recovery**: Retries carry stable canonical `operationId`s. The server returns `ALREADY_APPLIED`, and the client records durable acknowledgment without duplicating revisions.
+  - **Contiguous Cursor Safety**: Server cursors advance monotonically only after incoming operations successfully commit to local storage. Invalidation detection safely resets stale cursors if the server database was wiped or replaced.
+  - **Concurrent Conflict Reconciliation**: Offline concurrent edits trigger Phase 5 causal conflict detection upon reconnection, recording audit entries in `db.conflicts`. User resolutions generate canonical `TASK_RESOLVE` operations that replay over LAN.
+  - **Transport Provenance Isolation**: Remote tasks imported via PaperBridge QR are stored as `TASK_IMPORT` and never falsely enqueued into the local outbox.
+  - **Reactive Telemetry & Controls**: Dashboard displays live Offline Queue indicators; Connections page displays Outbox metrics (Pending, In Flight, Blocked / Error, Acknowledged) and a "Retry Blocked & Failed Operations" action.
 
 - **Local Network Server & Real-Time LAN Synchronization (Phase 6)**:
   - **Local Host Coordinator (`apps/server`)**: Node.js, Express, and Socket.IO server backed by persistent SQLite (`node:sqlite` `DatabaseSync`) running in WAL mode with foreign key enforcement. Configurable host binding (`0.0.0.0` or custom LAN IP) and optional session token authentication (`LAN_SESSION_TOKEN`).
@@ -251,47 +283,55 @@ The server binds to `0.0.0.0:3001` by default and stores persistent data in `app
 4. Multilingual communication — implemented and verified.
 5. Two-way QR task lifecycle — implemented and verified.
 6. Local Wi-Fi communication — implemented and verified.
-7. Offline queue and synchronization — planned.
-8. PWA and mobile readiness — planned.
+7. Offline queue and synchronization — implemented and verified.
+8. PWA and mobile readiness — implemented and verified.
 9. Final UI and mission control — planned.
 10. Testing and demo preparation — planned.
 
-See [implementation-plan.md](docs/implementation-plan.md), [architecture.md](docs/architecture.md), [lan-sync-protocol.md](docs/lan-sync-protocol.md), [paperbridge-protocol.md](docs/paperbridge-protocol.md), [synchronization-protocol.md](docs/synchronization-protocol.md), and [multilingual-protocol.md](docs/multilingual-protocol.md) for boundaries and technical details.
+See [implementation-plan.md](docs/implementation-plan.md), [architecture.md](docs/architecture.md), [pwa-offline-setup.md](docs/pwa-offline-setup.md), [offline-queue-recovery.md](docs/offline-queue-recovery.md), [lan-sync-protocol.md](docs/lan-sync-protocol.md), [paperbridge-protocol.md](docs/paperbridge-protocol.md), [synchronization-protocol.md](docs/synchronization-protocol.md), and [multilingual-protocol.md](docs/multilingual-protocol.md) for boundaries and technical details.
 
 ## Verification results
 
 Verified through 25 October 2026 with Node 24.15.0, npm 11.12.1, and Chromium on Windows:
 
-| Check                       | Actual result                                                                                                                       |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Dependency installation     | Passed; zero vulnerabilities reported by npm                                                                                        |
-| `npm run dev`               | Both workspace servers started; frontend returned HTTP 200                                                                          |
-| Live `GET /health`          | HTTP 200 with `{ "status": "ok", "service": "relay-miden-server", "phase": 2 }`                                                     |
-| `npm run typecheck`         | Passed for web, server, and shared with zero errors                                                                                 |
-| `npm run lint`              | Passed with zero warnings and zero errors                                                                                           |
-| `npm test`                  | 113 tests passed across 9 suites: 12 server integration, 7 client LAN, and 94 Phase 1–5 regressions                                 |
-| `npm run build`             | Shared, server, and web production builds passed cleanly                                                                            |
-| `npm run test:e2e`          | 19 Playwright tests passed: 7 viewports without overflow, CRUD, languages, QR v1/v2 transfer, conflict convergence, LAN UI controls |
-| Responsive coverage         | Verified across 7 viewport widths (320px–1440px) without horizontal overflow or uncaught page errors                                |
-| Real-time LAN Sync          | Verified socket registration, persistent SQLite commit, incremental sync pagination, and broadcast across client instances          |
-| Multi-device QR transfer    | Verified end-to-end task export, image upload, decoding, pre-import review, and persistence across isolated browser contexts        |
-| Duplicate suppression       | Rescanning same QR code or duplicate LAN operation displays idempotent result without duplicate tasks or operation logs             |
-| Offline CRUD & Persistence  | Task creation, inline edit, status updates, reopen, and soft deletion persist across browser reloads in IndexedDB                   |
-| Reactive Dashboard          | Dashboard counters, live status, and recent tasks update reactively via `useLiveQuery` and `useLanSync`                             |
-| Palette and indicator fills | Exact rendered palette verified; metric, priority, and status backgrounds transparent; brand hex values centralized in palette.css  |
-| `npm run format:check`      | Passed with 100% Prettier compliance                                                                                                |
+| Check                       | Actual result                                                                                                                                                                                |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dependency installation     | Passed; zero vulnerabilities reported by npm                                                                                                                                                 |
+| `npm run dev`               | Both workspace servers started; frontend returned HTTP 200                                                                                                                                   |
+| Live `GET /health`          | HTTP 200 with `{ "status": "ok", "service": "relay-miden-server", "phase": 2 }`                                                                                                              |
+| `npm run typecheck`         | Passed for web, server, and shared with zero errors                                                                                                                                          |
+| `npm run lint`              | Passed with zero warnings and zero errors                                                                                                                                                    |
+| `npm test`                  | 135 tests passed across 11 suites: 9 PWA/manifest/caching, 13 outbox/sync recovery, 7 client LAN, 12 server integration, and 94 Phase 1–5 regressions                                        |
+| `npm run build`             | Shared, server, and web production builds passed cleanly; PWA precache manifest generated with 32 entries (1,417 KiB)                                                                        |
+| `npm run test:e2e`          | 22 Playwright tests passed: 7 viewports without overflow, CRUD, languages, QR transfer, conflict convergence, LAN server controls, outbox queue, PWA manifest/meta, offline task navigation  |
+| Responsive coverage         | Verified across 7 viewport widths (320px–1440px) without horizontal overflow or uncaught page errors                                                                                         |
+| PWA Manifest & Icons        | W3C manifest generated with `#004225` theme color, `#F5F5DC` background, standalone mode; complete icon suite (192×192, 512×512, 512×512 maskable, apple-touch-icon, favicon)                |
+| Service Worker & App Shell  | Workbox generates `sw.js` precaching 32 essential assets; navigation fallback to `/index.html` with explicit `/api/`, `/socket.io/`, `/health/` exclusion denylist                           |
+| Offline Launch & Storage    | Application launches and navigates completely offline; IndexedDB tasks and outbox queues remain intact and are never cleared during cache updates                                            |
+| PWA Install & Updates       | Chromium `beforeinstallprompt` handling, iOS Safari Add to Home Screen instructions, standalone mode detection; non-intrusive update notification with user-controlled reload activation     |
+| Secure LAN HTTPS Tooling    | `npm run cert:gen` generates multi-IP SAN TLS certificates; `npm run dev:https` starts frontend and server with TLS/WSS; mobile camera access supported in secure context                    |
+| Durable Outbox & Recovery   | Verified atomic local mutation enqueueing, abandoned `IN_FLIGHT` recovery on restart, legacy backfill, and live outbox queue telemetry on dashboard/settings                                 |
+| Reconnection & Backoff      | Autonomous reconnection with bounded exponential backoff (1s–30s) and $\pm 20\%$ jitter; clean listener teardown; explicit disconnect suppression                                            |
+| Causal Replay & Idempotency | Verified parent-first revision replay (1 -> 2 -> 3), duplicate idempotence (`ALREADY_APPLIED`), lost ACK recovery, and missing-parent blocking                                               |
+| Contiguous Cursor Safety    | Verified server cursor advances only after local durable commits; invalid server sequence resets detected without data loss                                                                  |
+| Conflict Reconciliation     | Offline concurrent edits trigger Phase 5 causal detection; user resolutions generate canonical `TASK_RESOLVE` operations replaying over LAN to convergence                                   |
+| QR / LAN Interoperability   | PaperBridge QR imports tracked separately as `TASK_IMPORT` without false outbox publishing; shared operation IDs prevent duplicates                                                          |
+| `npm run format:check`      | Passed with 100% Prettier compliance                                                                                                                                                         |
+| LAN HTTP mobile UUID repair | `npm run typecheck`, lint, build, and format check passed; 58 targeted storage, sync, QR, and UUID tests passed. Full LAN socket tests remain sandbox-blocked by loopback `EACCES`.          |
+| Mobile camera QR repair     | Type check, lint, production build, format check, and 58 targeted task-storage, PaperBridge, and synchronization tests passed. Physical camera decoding requires a phone test after restart. |
 
 The production bundle passes, with Vite's existing advisory that the main JavaScript chunk exceeds 500 kB. Automated browser suites verify LAN UI controls, error states, and isolated client/server exchanges. Physical multi-device LAN testing on distinct hardware has not been manually verified this execution.
 
 ## Known limitations
 
-- Camera scanning requires HTTPS or localhost due to standard browser security policies on `getUserMedia`. Users accessing over an unencrypted local IP HTTP network must use the QR Image Upload option.
+- Background sync when all browser tabs are closed is not supported across all mobile browsers (especially iOS Safari); Relay Miden relies on the durable outbox to replay immediately upon app launch or reconnect.
+- Camera scanning requires HTTPS or localhost due to standard browser security policies on `getUserMedia`. Users accessing over an unencrypted local IP HTTP network must use the QR Image Upload option, or run `npm run dev:https` with locally trusted TLS certificates.
+- Physical device installation and camera access on actual mobile phones require running `npm run dev:https` and trusting the generated certificate on the phone; simulated headless browsers verify API presence and secure context detection.
+- Some mobile browsers restrict `crypto.randomUUID()` on unencrypted LAN HTTP origins. Relay Miden uses a secure `crypto.getRandomValues()` UUID fallback for this case; restart the development server after updating before testing on a phone.
 - Single QR payloads are capped at 2,048 bytes to ensure reliable scanning on mobile camera viewfinders.
 - Several local edits over QR require individual transfers in revision order. A missing operation is rejected and must be transferred before retrying the dependent update.
 - Conflict resolution supports choosing either complete branch. It does not offer field-by-field merging.
 - Legacy v1 task snapshots can act as shared ancestry for subsequent v2 edits. Historical operations that predate causal IDs are retained unchanged; the protocol never fabricates missing parent records.
-- Automatic durable background retry queues, reconnection replay, and retry scheduling arrive in Phase 7. Phase 6 requires active connection during mutation or manual "Sync Now" recovery.
-- Full service worker caching and offline startup installation arrive in Phase 8 (PWA).
 - Structured task codes and selected workflow UI are translated locally. Arbitrary locations and notes remain in the original language, by design.
 
 ## Development history
@@ -304,5 +344,10 @@ Every Codex execution must update this README and create a unique, immutable Mar
 - [Phase 4 multilingual communication audit, fixes, and verification — 2026-10-25](docs/history/phase-04-20261024T185518Z-b1e5d9.md)
 - [Phase 5 bidirectional PaperBridge synchronization and verification — 2026-10-25](docs/history/phase-05-20261024T193303Z-1590d1.md)
 - [Phase 6 LAN server and real-time local network synchronization — 2026-10-25](docs/history/phase-06-20261024T203500Z-7f8a12.md)
+- [Phase 7 durable offline queue, automatic reconnection, and synchronization recovery — 2026-10-25](docs/history/phase-07-20261024T211000Z-9e4a7b.md)
+- [Phase 7 LAN HTTP mobile-storage compatibility repair — 2026-10-25](docs/history/phase-07-20261024T215134Z-4b39f2.md)
+- [Phase 7 mobile camera QR scanning reliability repair — 2026-10-25](docs/history/phase-07-20261024T220919Z-c82f40.md)
+- [Phase 7 camera constraint correction — 2026-10-25](docs/history/phase-07-20261024T221306Z-7ad27c.md)
+- [Phase 8 Progressive Web App, offline launch, installability, and secure LAN — 2026-10-25](docs/history/phase-08-20261024T225500Z-e8f4a1.md)
 
-No Git commands were executed during Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, or Phase 6. The original MIT [LICENSE](LICENSE) is preserved.
+No Git commands were executed during Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Phase 6, Phase 7, or Phase 8. The original MIT [LICENSE](LICENSE) is preserved.

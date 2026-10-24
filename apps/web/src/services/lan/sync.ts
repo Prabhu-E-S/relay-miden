@@ -1,6 +1,7 @@
 import {
   TaskSchema,
   TaskOperationSchema,
+  generateUuid,
   taskStateHash,
   type Task,
   type TaskOperation,
@@ -20,6 +21,15 @@ import {
   type LanSyncBatch,
 } from './protocol';
 import { lanConnection } from './connection';
+import {
+  calculateBackoffDelay,
+  getPendingEntriesForReplay,
+  markOutboxAcknowledged,
+  markOutboxBlocked,
+  markOutboxFailed,
+  markOutboxInFlight,
+  markOutboxRetry,
+} from './outbox';
 
 const SYNCED_OPERATIONS_KEY = 'lan_synced_operations';
 
@@ -41,6 +51,8 @@ export async function recordServerAcceptance(
   database: RelayMidenDatabase = db,
 ): Promise<void> {
   try {
+    await markOutboxAcknowledged(operationId, serverSequence, database);
+
     const existing = await getSyncedOperationIds(database);
     if (!existing.includes(operationId)) {
       existing.push(operationId);
@@ -161,9 +173,8 @@ export async function applyIncomingLanOperation(
       `lan-${operation.update.operationId}`,
     );
 
-    await recordServerAcceptance(operation.update.operationId, undefined, database);
-
     if (result.status === 'APPLIED' || result.status === 'ALREADY_APPLIED') {
+      await recordServerAcceptance(operation.update.operationId, undefined, database);
       return { status: result.status, task: result.task };
     }
 
@@ -188,10 +199,13 @@ export async function submitLocalOperation(
     return null;
   }
 
+  // Mark outbox entry as IN_FLIGHT
+  await markOutboxInFlight(operationId, database);
+
   try {
     const payload = await buildLanOperationPayload(operationId, database, sync);
     const deviceId = await tasks.getDeviceId();
-    const requestId = crypto.randomUUID();
+    const requestId = generateUuid();
 
     const submitEnvelope: LanOperationSubmit = {
       protocolVersion: LAN_PROTOCOL_VERSION,
@@ -200,31 +214,46 @@ export async function submitLocalOperation(
       operation: payload,
     };
 
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
+    return await new Promise((resolve) => {
+      const timer = setTimeout(async () => {
         cleanup();
+        const timeoutMsg = 'Operation submission timed out waiting for server response.';
+        await markOutboxRetry(operationId, timeoutMsg, calculateBackoffDelay(1), database);
         resolve({
           requestId,
           operationId,
           classification: 'INVALID',
-          reason: 'Operation submission timed out waiting for server response.',
+          reason: timeoutMsg,
         });
       }, 8000);
 
-      const onAccepted = (data: unknown) => {
+      const onAccepted = async (data: unknown) => {
         const parsed = LanOperationAcceptedSchema.safeParse(data);
         if (parsed.success && parsed.data.requestId === requestId) {
           cleanup();
-          void recordServerAcceptance(operationId, parsed.data.sequence, database);
+          await recordServerAcceptance(operationId, parsed.data.sequence, database);
           resolve(parsed.data);
         }
       };
 
-      const onRejected = (data: unknown) => {
+      const onRejected = async (data: unknown) => {
         const parsed = LanOperationRejectedSchema.safeParse(data);
         if (parsed.success && parsed.data.requestId === requestId) {
           cleanup();
-          resolve(parsed.data);
+          const rejection = parsed.data;
+          switch (rejection.classification) {
+            case 'CONFLICT':
+            case 'MISSING_PARENT':
+            case 'STALE':
+              await markOutboxBlocked(operationId, rejection.reason, database);
+              break;
+            case 'INVALID':
+            case 'UNAUTHORIZED':
+            case 'DUPLICATE_MISMATCH':
+              await markOutboxFailed(operationId, rejection.reason, database);
+              break;
+          }
+          resolve(rejection);
         }
       };
 
@@ -240,10 +269,66 @@ export async function submitLocalOperation(
       socket.emit('operation:submit', submitEnvelope);
     });
   } catch (err) {
-    console.error('Failed to submit local operation to LAN:', err);
+    const msg = err instanceof Error ? err.message : 'Failed to build or submit operation';
+    await markOutboxRetry(operationId, msg, calculateBackoffDelay(1), database);
     return null;
   }
 }
+
+/**
+ * Replays all eligible pending outbox operations in strict causal order.
+ */
+export async function replayPendingOutbox(
+  database: RelayMidenDatabase = db,
+  tasks: TaskRepository = taskRepository,
+  sync: SyncRepository = syncRepository,
+): Promise<{ replayed: number; acknowledged: number; blocked: number; failed: number }> {
+  const eligible = await getPendingEntriesForReplay(database);
+  const stats = { replayed: 0, acknowledged: 0, blocked: 0, failed: 0 };
+  const blockedTasks = new Set<string>();
+
+  for (const entry of eligible) {
+    if (blockedTasks.has(entry.taskId)) {
+      await markOutboxBlocked(
+        entry.operationId,
+        'Prerequisite parent operation for this task is blocked.',
+        database,
+      );
+      stats.blocked++;
+      continue;
+    }
+
+    stats.replayed++;
+    const result = await submitLocalOperation(entry.operationId, database, tasks, sync);
+
+    if (!result) {
+      // Transport failed or socket disconnected; pause remaining replay
+      break;
+    }
+
+    if ('status' in result) {
+      // Accepted: APPLIED or ALREADY_APPLIED
+      stats.acknowledged++;
+    } else {
+      // Rejected
+      blockedTasks.add(entry.taskId);
+      if (['CONFLICT', 'MISSING_PARENT', 'STALE'].includes(result.classification)) {
+        stats.blocked++;
+      } else {
+        stats.failed++;
+      }
+    }
+  }
+
+  return stats;
+}
+
+// Single-flight synchronization lock to prevent concurrent sync loops
+let activeSyncPromise: Promise<{
+  operationsApplied: number;
+  nextCursor: number;
+  outboxReplayed?: number;
+}> | null = null;
 
 export async function requestLanSync(
   cursor?: number,
@@ -251,76 +336,140 @@ export async function requestLanSync(
   database: RelayMidenDatabase = db,
   tasks: TaskRepository = taskRepository,
   sync: SyncRepository = syncRepository,
-): Promise<{ operationsApplied: number; nextCursor: number }> {
-  const socket = lanConnection.getSocket();
-  if (!socket || !lanConnection.isConnected()) {
-    throw new Error('Cannot synchronize: LAN server is not connected.');
+): Promise<{ operationsApplied: number; nextCursor: number; outboxReplayed?: number }> {
+  if (activeSyncPromise) {
+    return activeSyncPromise;
   }
 
-  const deviceId = await tasks.getDeviceId();
-  let currentCursor = cursor ?? lanConnection.getSyncCursor();
-  let totalApplied = 0;
-  let hasMore = true;
-
-  // Push unsynchronized local operations first
-  const unsynced = await getUnsynchronizedOperations(database, tasks);
-  for (const op of unsynced) {
-    try {
-      await submitLocalOperation(op.operationId, database, tasks, sync);
-    } catch (err) {
-      console.warn('Failed to push unsynced operation during sync:', op.operationId, err);
+  activeSyncPromise = (async () => {
+    const socket = lanConnection.getSocket();
+    if (!socket || !lanConnection.isConnected()) {
+      throw new Error('Cannot synchronize: LAN server is not connected.');
     }
-  }
 
-  // Pull missing operations from server
-  while (hasMore) {
-    const batch = await new Promise<LanSyncBatch>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        socket.off('sync:operations', onBatch);
-        reject(new Error('Sync request timed out waiting for server operations.'));
-      }, 10000);
+    const deviceId = await tasks.getDeviceId();
+    let currentCursor = cursor ?? lanConnection.getSyncCursor();
+    let totalApplied = 0;
+    let hasMore = true;
 
-      const onBatch = (data: unknown) => {
-        const parsed = LanSyncBatchSchema.safeParse(data);
-        if (parsed.success) {
-          clearTimeout(timer);
+    // Pull missing operations from server
+    while (hasMore) {
+      const batch = await new Promise<LanSyncBatch>((resolve, reject) => {
+        const timer = setTimeout(() => {
           socket.off('sync:operations', onBatch);
-          resolve(parsed.data);
-        }
-      };
+          reject(new Error('Sync request timed out waiting for server operations.'));
+        }, 10000);
 
-      socket.on('sync:operations', onBatch);
+        const onBatch = (data: unknown) => {
+          const parsed = LanSyncBatchSchema.safeParse(data);
+          if (parsed.success) {
+            clearTimeout(timer);
+            socket.off('sync:operations', onBatch);
+            resolve(parsed.data);
+          }
+        };
 
-      socket.emit('sync:request', {
-        protocolVersion: LAN_PROTOCOL_VERSION,
-        deviceId,
-        cursor: currentCursor,
-        limit,
+        socket.on('sync:operations', onBatch);
+
+        socket.emit('sync:request', {
+          protocolVersion: LAN_PROTOCOL_VERSION,
+          deviceId,
+          cursor: currentCursor,
+          limit,
+        });
       });
-    });
 
-    for (const item of batch.operations) {
-      try {
-        const res = await applyIncomingLanOperation(item.operation, database, sync);
-        if (res.status === 'APPLIED') {
-          totalApplied++;
+      // Detect cursor invalidation (e.g. server reset or wiped database)
+      if (currentCursor > batch.totalServerOperations && batch.totalServerOperations >= 0) {
+        console.warn(
+          'Server sequence is lower than local cursor (server database may have been reset). Resetting cursor to 0.',
+        );
+        currentCursor = 0;
+        lanConnection.setSyncCursor(0);
+      }
+
+      for (const item of batch.operations) {
+        try {
+          const res = await applyIncomingLanOperation(item.operation, database, sync);
+          if (res.status === 'APPLIED') {
+            totalApplied++;
+          }
+          // Cursor safety: advance contiguous sequence only after durable commit
+          if (item.sequence > currentCursor) {
+            currentCursor = item.sequence;
+            lanConnection.setSyncCursor(currentCursor);
+          }
+        } catch (err) {
+          console.error('Error applying remote operation from sync batch:', err);
+          break;
         }
-      } catch (err) {
-        console.error('Error applying remote operation from sync batch:', err);
+      }
+
+      hasMore = batch.hasMore;
+    }
+
+    // Replay pending outbox entries in strict causal order
+    const replayStats = await replayPendingOutbox(database, tasks, sync);
+
+    // If outbox operations were accepted, do a quick catch-up check for any concurrent updates
+    if (replayStats.acknowledged > 0) {
+      try {
+        const followUpBatch = await new Promise<LanSyncBatch>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            socket.off('sync:operations', onFollowUp);
+            reject(new Error('Follow-up sync timed out.'));
+          }, 5000);
+
+          const onFollowUp = (data: unknown) => {
+            const parsed = LanSyncBatchSchema.safeParse(data);
+            if (parsed.success) {
+              clearTimeout(timer);
+              socket.off('sync:operations', onFollowUp);
+              resolve(parsed.data);
+            }
+          };
+
+          socket.on('sync:operations', onFollowUp);
+          socket.emit('sync:request', {
+            protocolVersion: LAN_PROTOCOL_VERSION,
+            deviceId,
+            cursor: currentCursor,
+            limit: 50,
+          });
+        });
+
+        for (const item of followUpBatch.operations) {
+          try {
+            const res = await applyIncomingLanOperation(item.operation, database, sync);
+            if (res.status === 'APPLIED') {
+              totalApplied++;
+            }
+            if (item.sequence > currentCursor) {
+              currentCursor = item.sequence;
+              lanConnection.setSyncCursor(currentCursor);
+            }
+          } catch (err) {
+            console.error('Error in follow-up sync batch:', err);
+            break;
+          }
+        }
+      } catch {
+        // Follow up batch timeout is non-fatal
       }
     }
 
-    if (batch.operations.length > 0) {
-      const last = batch.operations[batch.operations.length - 1];
-      if (last && last.sequence > currentCursor) {
-        currentCursor = last.sequence;
-      }
-    }
-    hasMore = batch.hasMore;
-    lanConnection.setSyncCursor(currentCursor);
+    lanConnection.setLastSyncAt(new Date().toISOString());
+
+    return {
+      operationsApplied: totalApplied,
+      nextCursor: currentCursor,
+      outboxReplayed: replayStats.replayed,
+    };
+  })();
+
+  try {
+    return await activeSyncPromise;
+  } finally {
+    activeSyncPromise = null;
   }
-
-  lanConnection.setLastSyncAt(new Date().toISOString());
-
-  return { operationsApplied: totalApplied, nextCursor: currentCursor };
 }

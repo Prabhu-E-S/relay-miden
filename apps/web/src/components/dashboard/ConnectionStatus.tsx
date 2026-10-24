@@ -1,8 +1,19 @@
-import { WifiOff, Network, QrCode } from 'lucide-react';
+import { WifiOff, Network, QrCode, Inbox, Smartphone } from 'lucide-react';
 import { useLanSync } from '../../hooks/use-lan-sync';
+import { usePwa } from '../../hooks/use-pwa';
 
 export function ConnectionStatus() {
-  const { status, lastError, lastSyncAt, isConnected } = useLanSync();
+  const { offlineReady, isStandalone } = usePwa();
+  const {
+    status,
+    lastError,
+    lastSyncAt,
+    isConnected,
+    pendingCount,
+    blockedCount,
+    failedCount,
+    nextRetrySeconds,
+  } = useLanSync();
 
   const getLanDisplay = () => {
     switch (status) {
@@ -20,11 +31,26 @@ export function ConnectionStatus() {
           color: 'text-brand',
           subtitle: 'Transferring data',
         };
+      case 'REGISTERING':
+        return {
+          label: 'Registering...',
+          color: 'text-muted',
+          subtitle: 'Validating device session',
+        };
       case 'CONNECTING':
         return {
           label: 'Connecting...',
           color: 'text-muted',
-          subtitle: 'Registering device',
+          subtitle: 'Handshaking LAN socket',
+        };
+      case 'RECONNECTING':
+        return {
+          label: 'Reconnecting...',
+          color: 'text-accent',
+          subtitle:
+            nextRetrySeconds !== null && nextRetrySeconds > 0
+              ? `Retrying in ${nextRetrySeconds}s`
+              : 'Retrying shortly',
         };
       case 'ERROR':
         return {
@@ -49,6 +75,37 @@ export function ConnectionStatus() {
   };
 
   const lan = getLanDisplay();
+
+  const getQueueDisplay = () => {
+    if (pendingCount > 0) {
+      return {
+        label: `${pendingCount} pending`,
+        color: 'text-accent',
+        subtitle: isConnected ? 'Replaying to server' : 'Queued offline',
+      };
+    }
+    if (blockedCount > 0) {
+      return {
+        label: `${blockedCount} blocked`,
+        color: 'text-accent',
+        subtitle: 'Awaiting resolution',
+      };
+    }
+    if (failedCount > 0) {
+      return {
+        label: `${failedCount} failed`,
+        color: 'text-danger',
+        subtitle: 'Requires review',
+      };
+    }
+    return {
+      label: 'All committed',
+      color: 'text-brand',
+      subtitle: 'Durable outbox clear',
+    };
+  };
+
+  const queue = getQueueDisplay();
 
   return (
     <section className="panel p-4 md:p-5" aria-labelledby="connection-title">
@@ -78,11 +135,42 @@ export function ConnectionStatus() {
         </div>
         <div className="flex items-center justify-between gap-3">
           <dt className="flex items-center gap-2.5 text-xs font-medium">
+            <Inbox size={19} aria-hidden="true" />
+            Offline Queue
+          </dt>
+          <dd className={`status-label text-right text-[11px] ${queue.color}`}>
+            {queue.label}
+            <span className="block text-[10px] text-muted">{queue.subtitle}</span>
+          </dd>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <dt className="flex items-center gap-2.5 text-xs font-medium">
             <QrCode size={19} aria-hidden="true" />
             QR Transfer
           </dt>
           <dd className="status-label text-right text-[11px] text-brand">
             Ready<span className="block text-[10px] text-muted">PaperBridge active</span>
+          </dd>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <dt className="flex items-center gap-2.5 text-xs font-medium">
+            <Smartphone size={19} aria-hidden="true" />
+            PWA Shell
+          </dt>
+          <dd className="status-label text-right text-[11px] text-brand">
+            {offlineReady ? (
+              <>
+                Ready offline
+                <span className="block text-[10px] text-muted">
+                  {isStandalone ? 'Standalone installed' : 'Cached in browser'}
+                </span>
+              </>
+            ) : (
+              <>
+                Caching…
+                <span className="block text-[10px] text-muted">Installing shell</span>
+              </>
+            )}
           </dd>
         </div>
       </dl>

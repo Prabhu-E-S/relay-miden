@@ -483,3 +483,93 @@ test('connections page provides LAN server configuration and status controls', a
   await expect(page.getByRole('alert')).toBeVisible();
   await expect(page.getByRole('alert')).toContainText('Invalid LAN server URL');
 });
+
+test('phase 7: durable offline queue displays pending operations and retry actions', async ({
+  page,
+}) => {
+  // 1. Visit Dashboard and verify initial connection status
+  await page.goto('/');
+  await expect(page.getByText('Offline Queue')).toBeVisible();
+  await expect(page.getByText('All committed')).toBeVisible();
+
+  // 2. Create a task while offline
+  await createTask(page, { title: 'Offline water delivery' });
+
+  // 3. Visit Dashboard and verify Offline Queue indicator reflects the pending operation
+  await page.goto('/');
+  await expect(page.getByText('1 pending')).toBeVisible();
+
+  // 4. Visit Connections page and verify outbox queue panel
+  await page.goto('/connections');
+  await expect(
+    page.getByRole('heading', { name: 'Durable Offline Operation Queue', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText('Pending', { exact: true })).toBeVisible();
+  await expect(page.getByText('Awaiting replay')).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Retry Blocked & Failed Operations' }),
+  ).toBeVisible();
+});
+
+test('phase 8: PWA manifest, metadata, dashboard shell status, and settings controls', async ({
+  page,
+}) => {
+  // 1. Visit Dashboard and verify PWA Shell indicator
+  await page.goto('/');
+  await expect(page.getByText('PWA Shell')).toBeVisible();
+
+  // 2. Verify head metadata tags
+  const manifestLink = page.locator('link[rel="manifest"]');
+  await expect(manifestLink).toHaveAttribute('href', '/manifest.webmanifest');
+
+  const themeColorMeta = page.locator('meta[name="theme-color"]');
+  await expect(themeColorMeta).toHaveAttribute('content', '#004225');
+
+  const appleTouchIcon = page.locator('link[rel="apple-touch-icon"]');
+  await expect(appleTouchIcon).toHaveAttribute('href', '/apple-touch-icon.png');
+
+  // 3. Visit Settings and verify PWA panel
+  await page.goto('/settings');
+  await expect(
+    page.getByRole('heading', { name: 'Progressive Web App & Offline Launch' }),
+  ).toBeVisible();
+  await expect(page.getByText('App Shell Cache')).toBeVisible();
+  await expect(page.getByText('Device Network')).toBeVisible();
+  await expect(page.getByText('Security Origin')).toBeVisible();
+  await expect(page.getByText('App Mode')).toBeVisible();
+  await expect(page.getByText('Application Version')).toBeVisible();
+
+  // 4. Verify footer phase tag
+  await expect(page.getByText(/Phase 8 — PWA & Offline Launch/)).toBeVisible();
+});
+
+test('phase 8: offline application preserves tasks and navigation after network disconnection', async ({
+  page,
+}) => {
+  // 1. Create a task
+  const taskId = await createTask(page, {
+    title: 'Offline hurricane emergency relief',
+    quantity: '100',
+    unit: 'Tarps',
+    location: 'Coastal Shelter B',
+    priority: 'Urgent',
+  });
+
+  // 2. Disconnect network
+  await page.context().setOffline(true);
+
+  // 3. Navigate within offline application
+  await page.goto('/tasks');
+  await expect(page.getByRole('heading', { name: 'Tasks', level: 1 })).toBeVisible();
+  await expect(page.getByText('Offline hurricane emergency relief')).toBeVisible();
+
+  // 4. View task details offline
+  await page.goto(`/tasks/${taskId}`);
+  await expect(
+    page.getByRole('heading', { name: 'Offline hurricane emergency relief' }),
+  ).toBeVisible();
+  await expect(page.getByText('Coastal Shelter B')).toBeVisible();
+
+  // 5. Restore network
+  await page.context().setOffline(false);
+});

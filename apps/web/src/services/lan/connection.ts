@@ -6,6 +6,7 @@ import {
   type LanConnectionStatus,
 } from './protocol';
 import { taskRepository } from '../../db/task-repository';
+import { calculateBackoffDelay } from './outbox';
 
 export interface LanConnectionState {
   status: LanConnectionStatus;
@@ -14,6 +15,8 @@ export interface LanConnectionState {
   lastError: string | null;
   lastSyncAt: string | null;
   serverSequence: number;
+  reconnectAttempt: number;
+  nextRetrySeconds: number | null;
 }
 
 const STORAGE_KEYS = {
@@ -44,6 +47,9 @@ export class LanConnectionManager {
   private state: LanConnectionState;
   private listeners: Set<(state: LanConnectionState) => void> = new Set();
   private isExplicitlyDisconnected = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private countdownInterval: ReturnType<typeof setInterval> | null = null;
+  private cachedDeviceId: string | undefined;
 
   constructor() {
     const savedUrl = readStorage(STORAGE_KEYS.SERVER_URL);
@@ -58,7 +64,32 @@ export class LanConnectionManager {
       lastError: null,
       lastSyncAt: savedLastSync,
       serverSequence: savedCursor,
+      reconnectAttempt: 0,
+      nextRetrySeconds: null,
     };
+
+    this.setupLifecycleListeners();
+  }
+
+  private setupLifecycleListeners(): void {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => {
+        if (!this.isExplicitlyDisconnected && this.state.serverUrl && !this.isConnected()) {
+          void this.reconnectNow();
+        }
+      });
+
+      document.addEventListener('visibilitychange', () => {
+        if (
+          document.visibilityState === 'visible' &&
+          !this.isExplicitlyDisconnected &&
+          this.state.serverUrl &&
+          !this.isConnected()
+        ) {
+          void this.reconnectNow();
+        }
+      });
+    }
   }
 
   getState(): LanConnectionState {
@@ -71,6 +102,14 @@ export class LanConnectionManager {
 
   isConnected(): boolean {
     return this.state.status === 'CONNECTED' || this.state.status === 'SYNCING';
+  }
+
+  isConnecting(): boolean {
+    return (
+      this.state.status === 'CONNECTING' ||
+      this.state.status === 'REGISTERING' ||
+      this.state.status === 'RECONNECTING'
+    );
   }
 
   getServerUrl(): string {
@@ -140,24 +179,78 @@ export class LanConnectionManager {
   }
 
   validateUrl(url: string): void {
+    let parsed: URL;
     try {
-      const parsed = new URL(url);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        throw new Error('LAN URL must use http: or https:');
-      }
+      parsed = new URL(url);
     } catch {
       throw new Error(`Invalid LAN server URL: ${url}. Example: http://192.168.1.10:3001`);
     }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`LAN URL must use http: or https:, received ${parsed.protocol}`);
+    }
+  }
+
+  private clearReconnectionTimers(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.countdownInterval) {
+      clearInterval(this.countdownInterval);
+      this.countdownInterval = null;
+    }
+  }
+
+  private scheduleReconnection(): void {
+    if (this.isExplicitlyDisconnected || !this.state.serverUrl) return;
+
+    this.clearReconnectionTimers();
+    const nextAttempt = this.state.reconnectAttempt + 1;
+    const delayMs = calculateBackoffDelay(nextAttempt);
+    let secondsLeft = Math.ceil(delayMs / 1000);
+
+    this.updateState({
+      status: 'RECONNECTING',
+      reconnectAttempt: nextAttempt,
+      nextRetrySeconds: secondsLeft,
+    });
+
+    this.countdownInterval = setInterval(() => {
+      secondsLeft = Math.max(0, secondsLeft - 1);
+      this.updateState({ nextRetrySeconds: secondsLeft });
+      if (secondsLeft === 0 && this.countdownInterval) {
+        clearInterval(this.countdownInterval);
+        this.countdownInterval = null;
+      }
+    }, 1000);
+
+    this.reconnectTimer = setTimeout(() => {
+      this.clearReconnectionTimers();
+      if (!this.isExplicitlyDisconnected && !this.isConnected()) {
+        void this.connect(undefined, undefined, this.cachedDeviceId);
+      }
+    }, delayMs);
+  }
+
+  async reconnectNow(): Promise<boolean> {
+    this.clearReconnectionTimers();
+    return this.connect(undefined, undefined, this.cachedDeviceId);
   }
 
   async connect(url?: string, token?: string, customDeviceId?: string): Promise<boolean> {
     const targetUrl = (url ?? this.state.serverUrl).trim();
     const sessionToken = (token ?? this.state.sessionToken).trim();
+    if (customDeviceId) {
+      this.cachedDeviceId = customDeviceId;
+    }
 
     if (!targetUrl) {
+      this.clearReconnectionTimers();
       this.updateState({
         status: 'NOT_CONFIGURED',
         lastError: 'LAN server URL is not configured.',
+        reconnectAttempt: 0,
+        nextRetrySeconds: null,
       });
       return false;
     }
@@ -165,9 +258,12 @@ export class LanConnectionManager {
     try {
       this.validateUrl(targetUrl);
     } catch (err) {
+      this.clearReconnectionTimers();
       this.updateState({
         status: 'ERROR',
         lastError: err instanceof Error ? err.message : 'Invalid LAN server URL',
+        reconnectAttempt: 0,
+        nextRetrySeconds: null,
       });
       return false;
     }
@@ -176,7 +272,7 @@ export class LanConnectionManager {
     this.setSessionToken(sessionToken);
     this.isExplicitlyDisconnected = false;
 
-    // Disconnect existing socket if any
+    // Disconnect existing socket and cleanup listeners
     if (this.socket) {
       this.socket.removeAllListeners();
       this.socket.disconnect();
@@ -191,8 +287,23 @@ export class LanConnectionManager {
       const finish = (success: boolean, error?: string) => {
         if (!resolved) {
           resolved = true;
-          if (!success && error) {
-            this.updateState({ status: 'ERROR', lastError: error });
+          if (success) {
+            this.clearReconnectionTimers();
+            this.updateState({
+              status: 'CONNECTED',
+              lastError: null,
+              reconnectAttempt: 0,
+              nextRetrySeconds: null,
+            });
+          } else {
+            if (error) {
+              this.updateState({ lastError: error });
+            }
+            if (!this.isExplicitlyDisconnected) {
+              this.scheduleReconnection();
+            } else {
+              this.updateState({ status: 'ERROR' });
+            }
           }
           resolve(success);
         }
@@ -200,9 +311,7 @@ export class LanConnectionManager {
 
       const socket = io(targetUrl, {
         transports: ['websocket', 'polling'],
-        reconnection: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000,
+        reconnection: false, // We control reconnection explicitly with exponential backoff & jitter
         timeout: 10000,
         autoConnect: false,
       });
@@ -210,6 +319,7 @@ export class LanConnectionManager {
       this.socket = socket;
 
       socket.on('connect', async () => {
+        this.updateState({ status: 'REGISTERING' });
         try {
           const deviceId = customDeviceId ?? (await taskRepository.getDeviceId());
           const registrationPayload = LanDeviceRegistrationSchema.parse({
@@ -232,19 +342,11 @@ export class LanConnectionManager {
       socket.on('device:registered', (data: unknown) => {
         const parsed = LanRegistrationResultSchema.safeParse(data);
         if (parsed.success && parsed.data.success) {
-          this.updateState({
-            status: 'CONNECTED',
-            lastError: null,
-          });
           finish(true);
         } else {
           const msg = parsed.success
             ? (parsed.data.message ?? 'Device registration failed on LAN server.')
             : 'Device registration rejected by LAN server.';
-          this.updateState({
-            status: 'ERROR',
-            lastError: msg,
-          });
           socket.disconnect();
           finish(false, msg);
         }
@@ -252,24 +354,21 @@ export class LanConnectionManager {
 
       socket.on('connect_error', (err) => {
         const msg = `Connection failed: ${err.message || 'Server unreachable'}`;
-        if (this.state.status === 'CONNECTING') {
-          finish(false, msg);
-        } else if (!this.isExplicitlyDisconnected) {
-          this.updateState({
-            status: 'ERROR',
-            lastError: msg,
-          });
-        }
+        finish(false, msg);
       });
 
       socket.on('disconnect', (reason) => {
         if (this.isExplicitlyDisconnected) {
-          this.updateState({ status: 'DISCONNECTED', lastError: null });
-        } else {
           this.updateState({
             status: 'DISCONNECTED',
-            lastError: `Disconnected: ${reason}`,
+            lastError: null,
+            reconnectAttempt: 0,
+            nextRetrySeconds: null,
           });
+        } else {
+          const msg = `Disconnected: ${reason}`;
+          this.updateState({ lastError: msg });
+          this.scheduleReconnection();
         }
       });
 
@@ -287,13 +386,19 @@ export class LanConnectionManager {
 
   disconnect(): void {
     this.isExplicitlyDisconnected = true;
+    this.clearReconnectionTimers();
+
     if (this.socket) {
+      this.socket.removeAllListeners();
       this.socket.disconnect();
       this.socket = null;
     }
+
     this.updateState({
       status: this.state.serverUrl ? 'DISCONNECTED' : 'NOT_CONFIGURED',
       lastError: null,
+      reconnectAttempt: 0,
+      nextRetrySeconds: null,
     });
   }
 }

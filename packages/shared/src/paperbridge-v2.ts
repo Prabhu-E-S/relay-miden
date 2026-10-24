@@ -8,6 +8,7 @@ import {
   decodePaperBridgeMessage,
 } from './paperbridge.js';
 import { TaskAckPayloadSchema, TaskUpdatePayloadSchema } from './sync.js';
+import { generateUuid } from './uuid.js';
 
 const header = z.object({
   protocol: z.literal(PaperBridgeProtocolIdentifier),
@@ -38,7 +39,7 @@ export async function createPaperBridgeV2Envelope(
   const withoutChecksum = {
     protocol: PaperBridgeProtocolIdentifier,
     version: 2 as const,
-    messageId: options.messageId ?? crypto.randomUUID(),
+    messageId: options.messageId ?? generateUuid(),
     senderId,
     createdAt: options.now ?? new Date().toISOString(),
     messageType: input.messageType,
