@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie';
 import type { Task, TaskOperation } from '@relay-miden/shared';
+import type { PaperBridgeV2Envelope, TaskUpdatePayload } from '@relay-miden/shared';
 
 export const DATABASE_NAME = 'relay-miden-db';
 
@@ -14,6 +15,38 @@ export interface PaperBridgeImportRecord {
   taskId: string;
   senderId: string;
   importedAt: string;
+  rawJson?: string;
+}
+
+export interface OutgoingRecord {
+  messageId: string;
+  taskId: string;
+  operationId: string;
+  createdAt: string;
+  rawJson: string;
+  acknowledgedAt?: string;
+  acknowledgedBy?: string;
+}
+
+export interface AcknowledgmentRecord {
+  messageId: string;
+  acknowledgedMessageId: string;
+  taskId: string;
+  receivedAt: string;
+  envelope: Extract<PaperBridgeV2Envelope, { messageType: 'TASK_ACK' }>;
+}
+
+export interface SyncConflictRecord {
+  id: string;
+  taskId: string;
+  incomingOperationId: string;
+  incomingMessageId: string;
+  localTask: Task;
+  incoming: TaskUpdatePayload;
+  createdAt: string;
+  resolvedAt?: string;
+  resolution?: 'KEEP_LOCAL' | 'ACCEPT_INCOMING';
+  resolutionOperationId?: string;
 }
 
 export class RelayMidenDatabase extends Dexie {
@@ -21,6 +54,9 @@ export class RelayMidenDatabase extends Dexie {
   operations!: EntityTable<TaskOperation, 'operationId'>;
   settings!: EntityTable<LocalSetting, 'key'>;
   imports!: EntityTable<PaperBridgeImportRecord, 'messageId'>;
+  outgoing!: EntityTable<OutgoingRecord, 'messageId'>;
+  acknowledgments!: EntityTable<AcknowledgmentRecord, 'messageId'>;
+  conflicts!: EntityTable<SyncConflictRecord, 'id'>;
 
   constructor(name = DATABASE_NAME) {
     super(name);
@@ -31,6 +67,13 @@ export class RelayMidenDatabase extends Dexie {
     });
     this.version(2).stores({
       imports: 'messageId, taskId, importedAt',
+    });
+    this.version(3).stores({
+      operations:
+        'operationId, taskId, operationType, timestamp, revision, [taskId+revision], parentOperationId, mergedOperationId',
+      outgoing: 'messageId, taskId, operationId, acknowledgedAt',
+      acknowledgments: 'messageId, acknowledgedMessageId, taskId',
+      conflicts: 'id, taskId, incomingOperationId, resolvedAt',
     });
   }
 }

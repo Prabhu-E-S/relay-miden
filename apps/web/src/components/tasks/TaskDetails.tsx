@@ -10,6 +10,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
+import { useLiveQuery } from 'dexie-react-hooks';
 import {
   TASK_STATUS_SEQUENCE,
   type Task,
@@ -23,6 +24,8 @@ import { actionLabels, formatDateTime } from '../../lib/task-display';
 import { readableDatabaseError } from '../../db/errors';
 import { taskRepository } from '../../db/task-repository';
 import { useLanguage } from '../../hooks/use-language';
+import { db } from '../../db/database';
+import { syncRepository } from '../../services/sync/sync-repository';
 
 export function TaskDetails({ task, operations }: { task: Task; operations: TaskOperation[] }) {
   const navigate = useNavigate();
@@ -35,12 +38,18 @@ export function TaskDetails({ task, operations }: { task: Task; operations: Task
   const [error, setError] = useState('');
   const activeIndex = TASK_STATUS_SEQUENCE.indexOf(task.status);
   const nextStatus = TASK_STATUS_SEQUENCE[activeIndex + 1];
+  const conflicts = useLiveQuery(() => syncRepository.getConflicts(task.id), [task.id]);
+  const outgoing = useLiveQuery(
+    () => db.outgoing.where('taskId').equals(task.id).toArray(),
+    [task.id],
+  );
 
   const operationLabels: Record<TaskOperationType, string> = {
     TASK_CREATE: dict.task.taskCreatedActivity,
     TASK_UPDATE: dict.task.taskUpdatedActivity,
     TASK_DELETE: dict.task.taskDeletedActivity,
     TASK_IMPORT: dict.task.taskImportedActivity,
+    TASK_RESOLVE: 'Conflict resolved',
   };
 
   async function changeStatus(status: TaskStatus, allowReopen = false) {
@@ -67,6 +76,19 @@ export function TaskDetails({ task, operations }: { task: Task; operations: Task
       navigate('/tasks', { replace: true, state: { notice: dict.task.deletedNotice } });
     } catch (cause) {
       setError(readableDatabaseError(cause));
+      setBusy(false);
+    }
+  }
+
+  async function resolveConflict(id: string, choice: 'KEEP_LOCAL' | 'ACCEPT_INCOMING') {
+    setBusy(true);
+    setError('');
+    try {
+      await syncRepository.resolveConflict(id, choice);
+      setMessage('Conflict resolved locally. Send the resolution QR to the other device.');
+    } catch (cause) {
+      setError(readableDatabaseError(cause));
+    } finally {
       setBusy(false);
     }
   }
@@ -193,7 +215,81 @@ export function TaskDetails({ task, operations }: { task: Task; operations: Task
           <Link to={`/send?task=${task.id}`} className="button-secondary mt-3 w-full">
             <QrCode size={17} /> {dict.task.viewQRLink}
           </Link>
+          <Link to={`/send?task=${task.id}&mode=update`} className="button-secondary mt-3 w-full">
+            <QrCode size={17} /> Send Update via QR
+          </Link>
+          {outgoing && outgoing.length > 0 && (
+            <p className="mt-3 text-xs text-muted">
+              {outgoing.filter((item) => !item.acknowledgedAt).length} pending outgoing update(s)
+              {outgoing.some((item) => item.acknowledgedAt) &&
+                ` · Last acknowledged ${formatDateTime(outgoing.filter((item) => item.acknowledgedAt).at(-1)!.acknowledgedAt!)}`}
+            </p>
+          )}
         </section>
+
+        {conflicts?.map((conflict) => (
+          <section key={conflict.id} className="panel mt-5 p-4 md:p-6">
+            <h2 className="text-base font-semibold">Resolve Task Conflict</h2>
+            <p className="mt-2 text-xs text-muted">
+              Both branches were preserved. Choose the state to keep, then send the resolution QR.
+            </p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-line p-3 text-xs">
+                <h3 className="font-semibold">Current local version</h3>
+                <p className="mt-2">{conflict.localTask.title}</p>
+                <p>Status: {dict.statuses[conflict.localTask.status]}</p>
+                <p>Priority: {dict.priorities[conflict.localTask.priority]}</p>
+                <p>Revision: {conflict.localTask.revision}</p>
+                <p className="mt-1 break-all font-mono text-[10px]">
+                  Device: {conflict.localTask.createdBy}
+                </p>
+              </div>
+              <div className="rounded-lg border border-line p-3 text-xs">
+                <h3 className="font-semibold">Incoming version</h3>
+                <p className="mt-2">
+                  {conflict.incoming.changes.title ?? conflict.localTask.title}
+                </p>
+                <p>
+                  Status:{' '}
+                  {conflict.incoming.changes.status
+                    ? dict.statuses[conflict.incoming.changes.status]
+                    : 'Unchanged'}
+                </p>
+                <p>
+                  Priority:{' '}
+                  {conflict.incoming.changes.priority
+                    ? dict.priorities[conflict.incoming.changes.priority]
+                    : 'Unchanged'}
+                </p>
+                <p>Base revision: {conflict.incoming.baseRevision}</p>
+                <p className="mt-1 break-all font-mono text-[10px]">
+                  Device: {conflict.incoming.originDeviceId}
+                </p>
+                <p className="mt-1 break-all font-mono text-[10px]">
+                  Operation: {conflict.incomingOperationId}
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="button-secondary"
+                disabled={busy}
+                onClick={() => void resolveConflict(conflict.id, 'KEEP_LOCAL')}
+              >
+                Keep Local Version
+              </button>
+              <button
+                type="button"
+                className="button-primary"
+                disabled={busy}
+                onClick={() => void resolveConflict(conflict.id, 'ACCEPT_INCOMING')}
+              >
+                Accept Incoming Version
+              </button>
+            </div>
+          </section>
+        ))}
 
         {editing && (
           <div className="mt-5">

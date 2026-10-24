@@ -12,25 +12,59 @@ export interface GenerateQROptions {
 
 /**
  * Generates a PNG data URL representation of the QR code using the centralized brand palette.
- * Defaults to brand forest green (#004225) on white background for high camera scan contrast.
+ * Callers provide the centralized brand color; the neutral fallback keeps this service UI-independent.
  */
 export async function generateQRCodeDataUrl(
   content: string,
   options: GenerateQROptions = {},
 ): Promise<string> {
   try {
-    return await QRCode.toDataURL(content, {
-      errorCorrectionLevel: options.errorCorrectionLevel ?? 'M',
-      margin: options.margin ?? 4,
-      width: options.width ?? 320,
-      color: {
-        dark: options.darkColor ?? '#004225',
-        light: options.lightColor ?? '#ffffff',
-      },
-    });
+    const baseWidth = options.width ?? 1024;
+    const levels = [options.errorCorrectionLevel ?? 'M', 'L', 'Q'] as const;
+    for (const width of [baseWidth, Math.max(baseWidth, 1280), Math.max(baseWidth, 1536)]) {
+      for (const errorCorrectionLevel of levels) {
+        const dataUrl = await QRCode.toDataURL(content, {
+          errorCorrectionLevel,
+          margin: options.margin ?? 4,
+          width,
+          color: {
+            dark: options.darkColor ?? '#000000',
+            light: options.lightColor ?? '#ffffff',
+          },
+        });
+        if (typeof document === 'undefined' || (await generatedQRDecodes(dataUrl, content))) {
+          return dataUrl;
+        }
+      }
+    }
+    throw new PaperBridgeError(
+      'This QR could not be verified locally. Shorten the task text and try again.',
+      'INVALID_TASK',
+    );
   } catch (error) {
+    if (error instanceof PaperBridgeError) throw error;
     throw new PaperBridgeError('Failed to generate QR code image.', 'INVALID_TASK', error);
   }
+}
+
+async function generatedQRDecodes(dataUrl: string, expected: string): Promise<boolean> {
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+  const canvas = document.createElement('canvas');
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) return false;
+  context.drawImage(image, 0, 0);
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+  return (
+    jsQR(pixels.data, pixels.width, pixels.height, { inversionAttempts: 'attemptBoth' })?.data ===
+    expected
+  );
 }
 
 /**

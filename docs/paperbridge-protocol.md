@@ -1,5 +1,7 @@
 # PaperBridge Protocol Specification
 
+> Phase 5 extension: this document's version 1 `TASK_CREATE` format remains unchanged. Version 2 `TASK_UPDATE` and `TASK_ACK` envelopes are defined in [synchronization-protocol.md](synchronization-protocol.md). The decoder dispatches by explicit protocol version; no existing v1 field changes meaning.
+
 ## 1. Overview
 
 PaperBridge is Relay Miden's network-independent task transmission mechanism. It serializes, cryptographically hashes, and encodes structured operational tasks into high-density 2D Quick Response (QR) matrices. These codes can be rendered on screen or printed on paper, enabling disconnected peer-to-peer data ingestion without local networks, Wi-Fi access points, Bluetooth pairing, public internet, cloud relays, or user credentials.

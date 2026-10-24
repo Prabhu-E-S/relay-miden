@@ -4,17 +4,75 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { PageHeader } from '../components/ui/PageHeader';
 import { EmptyState } from '../components/ui/EmptyState';
 import { QRDisplay } from '../components/qr/QRDisplay';
+import { QRMessageDisplay } from '../components/qr/QRMessageDisplay';
 import { TaskSummary } from '../components/tasks/TaskSummary';
 import { taskRepository } from '../db/task-repository';
 import { useLanguage } from '../hooks/use-language';
+import { syncRepository } from '../services/sync/sync-repository';
+import { db } from '../db/database';
+
+type SendMode = 'task' | 'update' | 'ack';
 
 export function SendPage() {
   const { dict, formatTaskTitle } = useLanguage();
   const [params, setParams] = useSearchParams();
-  const tasks = useLiveQuery(() => taskRepository.getAllTasks(), []);
+  const allTasks = useLiveQuery(() => db.tasks.toArray(), []);
   const [deviceId, setDeviceId] = useState<string>();
   const requestedId = params.get('task');
-  const task = tasks?.find((item) => item.id === requestedId) ?? tasks?.[0];
+  const [mode, setMode] = useState<SendMode>(params.get('mode') === 'update' ? 'update' : 'task');
+  const tasks = allTasks?.filter((item) => mode === 'update' || !item.deletedAt);
+  const task = tasks?.find((item) => item.id === requestedId) ?? tasks?.[0] ?? allTasks?.[0];
+  const operations = useLiveQuery(
+    () => (task ? syncRepository.getOutgoingOperations(task.id) : Promise.resolve([])),
+    [task?.id],
+  );
+  const defaultOperation =
+    operations?.at(-1)?.operationType === 'TASK_RESOLVE' ? operations.at(-1) : operations?.[0];
+  const acknowledgable = useLiveQuery(
+    () => (task ? syncRepository.getAcknowledgableUpdates(task.id) : Promise.resolve([])),
+    [task?.id],
+  );
+  const [selectedOperation, setSelectedOperation] = useState('');
+  const [selectedAcknowledgment, setSelectedAcknowledgment] = useState('');
+  const [encoded, setEncoded] = useState<{ rawJson: string; messageId: string } | null>(null);
+  const [exportError, setExportError] = useState('');
+
+  useEffect(() => {
+    if (!task || mode === 'task') return;
+    let active = true;
+    const selected =
+      mode === 'update'
+        ? selectedOperation || defaultOperation?.operationId
+        : selectedAcknowledgment || acknowledgable?.[0]?.messageId;
+    if (!selected) return;
+    (mode === 'update'
+      ? syncRepository.createOutgoingTaskUpdate(task.id, selected)
+      : syncRepository.createAcknowledgmentForMessage(selected)
+    )
+      .then((result) => {
+        if (active) {
+          setEncoded({ rawJson: result.rawJson, messageId: result.envelope.messageId });
+          setExportError('');
+        }
+      })
+      .catch((cause: unknown) => {
+        if (active) {
+          setEncoded(null);
+          setExportError(cause instanceof Error ? cause.message : 'QR export failed.');
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    task,
+    mode,
+    selectedOperation,
+    selectedAcknowledgment,
+    defaultOperation,
+    operations,
+    acknowledgable,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -48,18 +106,127 @@ export function SendPage() {
             <select
               className="control"
               value={task.id}
-              onChange={(event) => setParams({ task: event.target.value })}
+              onChange={(event) => {
+                setEncoded(null);
+                setSelectedOperation('');
+                setSelectedAcknowledgment('');
+                setParams({ task: event.target.value });
+              }}
             >
-              {tasks.map((item) => (
+              {(tasks?.length ? tasks : (allTasks ?? [])).map((item) => (
                 <option key={item.id} value={item.id}>
                   {formatTaskTitle(item)}
+                  {item.deletedAt ? ' (deleted)' : ''}
                 </option>
               ))}
             </select>
           </label>
           <TaskSummary task={task} />
+          {task.deletedAt && (
+            <p className="mt-3 text-xs text-muted">
+              This task is deleted locally. Its deletion update can still be shared.
+            </p>
+          )}
+          <div
+            className="mt-5 flex flex-wrap gap-2 border-t border-line pt-5"
+            role="group"
+            aria-label="PaperBridge message type"
+          >
+            {(
+              [
+                ['task', 'Send Task'],
+                ['update', 'Send Update'],
+                ['ack', 'Send Acknowledgment'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                type="button"
+                key={value}
+                onClick={() => {
+                  setMode(value);
+                  setEncoded(null);
+                  setExportError('');
+                }}
+                aria-pressed={mode === value}
+                className={mode === value ? 'button-primary text-xs' : 'button-secondary text-xs'}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {deviceId ? (
-            <QRDisplay task={task} deviceId={deviceId} />
+            mode === 'task' ? (
+              task.deletedAt ? (
+                <p className="mt-4 text-xs text-muted">
+                  Deleted tasks cannot be sent as new task QRs. Choose Send Update.
+                </p>
+              ) : (
+                <QRDisplay task={task} deviceId={deviceId} />
+              )
+            ) : (
+              <div>
+                {mode === 'update' ? (
+                  operations?.length ? (
+                    <label className="field mt-4">
+                      Choose a local change (send in revision order)
+                      <select
+                        className="control"
+                        value={selectedOperation || defaultOperation!.operationId}
+                        onChange={(event) => {
+                          setEncoded(null);
+                          setSelectedOperation(event.target.value);
+                        }}
+                      >
+                        {operations.map((operation) => (
+                          <option key={operation.operationId} value={operation.operationId}>
+                            Revision {operation.revision} ·{' '}
+                            {operation.operationType.replace('TASK_', '').toLowerCase()}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <p className="mt-4 text-xs text-muted">
+                      No local update is available. Edit or advance this task first.
+                    </p>
+                  )
+                ) : acknowledgable?.length ? (
+                  <label className="field mt-4">
+                    Acknowledgment for received update
+                    <select
+                      className="control"
+                      value={selectedAcknowledgment || acknowledgable[0]!.messageId}
+                      onChange={(event) => {
+                        setEncoded(null);
+                        setSelectedAcknowledgment(event.target.value);
+                      }}
+                    >
+                      {acknowledgable.map((item) => (
+                        <option key={item.messageId} value={item.messageId}>
+                          {item.messageId.slice(0, 8)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <p className="mt-4 text-xs text-muted">
+                    No applied incoming update needs an acknowledgment.
+                  </p>
+                )}
+                {exportError && (
+                  <p className="mt-3 text-xs text-danger" role="alert">
+                    {exportError}
+                  </p>
+                )}
+                {encoded && !exportError && (
+                  <QRMessageDisplay
+                    rawJson={encoded.rawJson}
+                    label={mode === 'update' ? 'Task update' : 'Acknowledgment'}
+                    filename={`relay-miden-${mode}-${encoded.messageId.slice(0, 8)}.png`}
+                  />
+                )}
+              </div>
+            )
           ) : (
             <div className="mt-6 border-t border-line pt-6 text-center text-xs text-muted">
               Loading device identity…

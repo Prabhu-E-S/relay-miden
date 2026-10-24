@@ -8,6 +8,7 @@ import {
   TaskStatusSchema,
   UpdateTaskInputSchema,
   verifyEnvelopeChecksum,
+  taskStateHash,
   type CreateTaskInput,
   type PaperBridgeEnvelope,
   type Task,
@@ -234,7 +235,14 @@ export class TaskRepository {
           }
           if (candidate.quantity === undefined) delete candidate.unit;
           const task = TaskSchema.parse(candidate);
-          const operation = this.createOperation(task, actorId, 'TASK_UPDATE', existing.revision);
+          const parent = await this.getHeadOperation(id, existing.revision);
+          const operation = this.createOperation(
+            task,
+            actorId,
+            'TASK_UPDATE',
+            existing.revision,
+            parent?.operationId ?? null,
+          );
           await this.database.tasks.put(task);
           await this.database.operations.add(operation);
           return task;
@@ -273,7 +281,14 @@ export class TaskRepository {
             updatedAt: this.now(),
             revision: existing.revision + 1,
           });
-          const operation = this.createOperation(task, actorId, 'TASK_UPDATE', existing.revision);
+          const parent = await this.getHeadOperation(id, existing.revision);
+          const operation = this.createOperation(
+            task,
+            actorId,
+            'TASK_UPDATE',
+            existing.revision,
+            parent?.operationId ?? null,
+          );
           await this.database.tasks.put(task);
           await this.database.operations.add(operation);
           return task;
@@ -300,7 +315,14 @@ export class TaskRepository {
             updatedAt: timestamp,
             revision: existing.revision + 1,
           });
-          const operation = this.createOperation(task, actorId, 'TASK_DELETE', existing.revision);
+          const parent = await this.getHeadOperation(id, existing.revision);
+          const operation = this.createOperation(
+            task,
+            actorId,
+            'TASK_DELETE',
+            existing.revision,
+            parent?.operationId ?? null,
+          );
           await this.database.tasks.put(task);
           await this.database.operations.add(operation);
           return task;
@@ -318,6 +340,14 @@ export class TaskRepository {
       .equals(taskId)
       .sortBy('revision');
     return operations.map((operation) => TaskOperationSchema.parse(operation));
+  }
+
+  private async getHeadOperation(id: string, revision: number): Promise<TaskOperation | undefined> {
+    const records = await this.database.operations
+      .where('[taskId+revision]')
+      .equals([id, revision])
+      .toArray();
+    return records.find((record) => record.operationType !== 'TASK_IMPORT') ?? records[0];
   }
 
   async importPaperBridgeTask(envelope: PaperBridgeEnvelope): Promise<ImportTaskResult> {
@@ -366,6 +396,20 @@ export class TaskRepository {
 
       // Check revision
       if (existingTask.revision === payload.revision) {
+        const incomingComparable = TaskSchema.parse({
+          ...payload,
+          id: payload.taskId,
+          deletedAt: null,
+        });
+        if ((await taskStateHash(existingTask)) !== (await taskStateHash(incomingComparable))) {
+          return {
+            status: 'conflict',
+            code: 'REVISION_CONFLICT',
+            task: existingTask,
+            message:
+              'This QR has the same revision but different task content. Local data was preserved.',
+          };
+        }
         // Record the import for deduplication
         await this.database.imports.put({
           messageId: validatedEnvelope.messageId,
@@ -484,6 +528,7 @@ export class TaskRepository {
     actorId: string,
     operationType: TaskOperationType,
     parentRevision: number | null,
+    parentOperationId: string | null = null,
   ): TaskOperation {
     return TaskOperationSchema.parse({
       operationId: this.operationId(),
@@ -493,6 +538,7 @@ export class TaskRepository {
       timestamp: task.updatedAt,
       revision: task.revision,
       parentRevision,
+      parentOperationId,
       payload: task,
     });
   }

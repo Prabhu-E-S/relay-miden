@@ -115,9 +115,7 @@ export function canonicalJsonStringify(value: unknown): string {
  * Computes a deterministic SHA-256 checksum over a PaperBridge envelope excluding the checksum field.
  * Uses the Web Crypto subtle API available in both modern browsers and Node 19+.
  */
-export async function computeEnvelopeChecksum(
-  envelopeWithoutChecksum: Omit<PaperBridgeEnvelope, 'checksum'>,
-): Promise<string> {
+export async function computeEnvelopeChecksum(envelopeWithoutChecksum: unknown): Promise<string> {
   const canonical = canonicalJsonStringify(envelopeWithoutChecksum);
   const data = new TextEncoder().encode(canonical);
   const cryptoObj = globalThis.crypto;
@@ -136,7 +134,7 @@ export async function computeEnvelopeChecksum(
  * Verifies that the checksum attached to a PaperBridge envelope matches the recalculated
  * SHA-256 digest of its canonicalized content.
  */
-export async function verifyEnvelopeChecksum(envelope: PaperBridgeEnvelope): Promise<boolean> {
+export async function verifyEnvelopeChecksum(envelope: { checksum: string }): Promise<boolean> {
   const { checksum, ...withoutChecksum } = envelope;
   const expectedChecksum = await computeEnvelopeChecksum(withoutChecksum);
   return checksum.toLowerCase() === expectedChecksum.toLowerCase();

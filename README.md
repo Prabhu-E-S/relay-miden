@@ -6,9 +6,17 @@ Relay Miden is an offline-first, multilingual task-coordination project for the 
 
 ## Current status
 
-**Phase 4 implemented and verified on 25 October 2026.** Relay Miden now stores language-independent structured task instructions and renders them locally in English, Malayalam, or Tamil. PaperBridge v1 preserves these canonical instruction codes across disconnected devices while each receiver chooses its own display language. No translation API, cloud service, or runtime network request is used.
+**Phase 5 implemented and verified on 25 October 2026.** Relay Miden now exchanges task changes and return acknowledgments through PaperBridge QR codes. Explicit state hashes and operation ancestry detect concurrent changes; users can resolve conflicts and transfer the resolution. Phase 4's local English, Malayalam, and Tamil rendering and PaperBridge v1 task import remain supported. No translation API, cloud service, or runtime network request is used.
 
 ### Implemented
+
+- **Bidirectional PaperBridge synchronization (Phase 5)**:
+  - PaperBridge v2 `TASK_UPDATE` and `TASK_ACK` envelopes with strict Zod payload validation, SHA-256 integrity checks, and the existing 2,048-byte QR payload ceiling. Version 1 `TASK_CREATE` decoding remains compatible.
+  - Local edits, status changes, soft deletion, and conflict resolutions retain append-only operation history. Update QRs export individual operations in revision order with base/result task-state hashes, parent operation IDs, and stable message IDs for retries.
+  - Update import classifies applicable, duplicate, stale, conflicting, invalid, and missing-history messages. Accepted updates atomically advance IndexedDB state and operation/import history; missing earlier updates can be rescanned after their dependencies arrive.
+  - Concurrent branches remain intact in persistent conflict records. Task Details shows local and incoming versions with Keep Local and Accept Incoming actions. Resolution creates a new transferable operation referencing both branches; two-device convergence is tested.
+  - Acknowledgment QRs identify a received message and operation. The sender accepts them only for a matching outgoing update, records duplicates idempotently, and does not change the task revision.
+  - Send/Receive screens support task, update, and acknowledgment QRs using camera or local image upload. Generated PNGs are checked with the local QR decoder before display; no transport server is involved.
 
 - **Offline multilingual task communication (Phase 4)**:
   - Bundled English (`en`), Malayalam (`ml`), and Tamil (`ta`) dictionaries for structured task actions, items, units, priorities, statuses, and task/QR workflow labels.
@@ -60,11 +68,11 @@ Relay Miden is an offline-first, multilingual task-coordination project for the 
 
 ### In progress
 
-- No active implementation phase. Phase 4 verification is complete.
+- No active implementation phase. Phase 5 verification is complete.
 
 ### Planned
 
-Two-way QR task lifecycle (acknowledgments & status updates), local Wi-Fi/LAN transport, synchronization queues, installable PWA behavior, final operational UI, and demo preparation. All core functionality must work without paid APIs or cloud infrastructure.
+Local Wi-Fi/LAN transport, durable synchronization queues, installable PWA behavior, final operational UI, and demo preparation. All core functionality must work without paid APIs or cloud infrastructure.
 
 ## PaperBridge: How to Transfer Tasks Offline
 
@@ -85,6 +93,16 @@ PaperBridge allows one device to transfer a task to another using a QR code disp
    - **Upload image**: Click to select a PNG or JPEG photo containing a PaperBridge QR code. Decoded entirely inside your browser.
 3. Review the decoded task details (title, action, quantity, location, priority, and original creator device).
 4. Click **Import Task**. The task is atomically saved to local IndexedDB storage and immediately appears on your Dashboard and Tasks list.
+
+### Sending and receiving a task update
+
+1. Both devices need the same task first. Transfer a **Send Task** QR if the receiver has no task copy.
+2. Edit, advance, or delete the task locally. Open **Send via QR**, select the task, then choose **Send Update**. Select each unsent local operation in revision order; the same operation reuses its stored message ID on retry. Resolved conflicts default to the resolution operation.
+3. On the other device, use **Receive via QR** to scan or upload the image. Review the proposed fields and choose **Apply Update**. The task changes only after the IndexedDB transaction succeeds.
+4. If an earlier revision is missing, transfer that earlier update first, then scan the pending QR again. If branches conflict, open Task Details to compare them and choose **Keep Local Version** or **Accept Incoming Version**. Export the resulting resolution through **Send Update** so the other device can converge.
+5. After an update applies, the receiver shows a return **Acknowledgment** QR. The original sender scans it and records a matching acknowledgment. A duplicate ACK leaves the task untouched. The Send page can also regenerate an ACK for a previously applied incoming update.
+
+QR exchange is asynchronous: neither device receives changes or acknowledgments until someone physically transfers the appropriate code. A SHA-256 checksum detects corruption but does not authenticate another device.
 
 ### Browser Camera & Security Notes
 
@@ -109,6 +127,7 @@ relay-miden/
 │   │   │   ├── lib/
 │   │   │   ├── pages/{ConnectionsPage.tsx,CreateTaskPage.tsx,DashboardPage.tsx,ReceivePage.tsx,SendPage.tsx,SettingsPage.tsx,TaskDetailsPage.tsx,TasksPage.tsx}
 │   │   │   ├── services/paperbridge/{checksum.ts,decode.ts,encode.ts,index.ts,qr.ts,paperbridge.test.ts}
+│   │   │   ├── services/sync/{sync-repository.ts,sync-repository.test.ts}
 │   │   │   ├── styles/{palette.css,globals.css}
 │   │   │   ├── App.tsx
 │   │   │   └── main.tsx
@@ -116,10 +135,10 @@ relay-miden/
 │   │   ├── vite.config.ts
 │   │   └── package.json
 │   └── server/src/{app.ts,app.test.ts,index.ts}
-├── packages/shared/src/{index.ts,paperbridge.ts,tasks.ts}
+├── packages/shared/src/{index.ts,paperbridge.ts,paperbridge-v2.ts,sync.ts,tasks.ts}
 ├── scripts/dev.mjs
 ├── tests/ui.spec.ts
-├── docs/{architecture.md,design-system.md,implementation-plan.md,paperbridge-protocol.md}
+├── docs/{architecture.md,design-system.md,implementation-plan.md,paperbridge-protocol.md,synchronization-protocol.md}
 ├── docs/history/
 ├── docs/verification/
 ├── AGENTS.md
@@ -171,41 +190,46 @@ Forest Green `#004225`, Beige `#F5F5DC`, Amber `#FFB000`, and Peach `#FFCF9D` ar
 2. Offline task engine — implemented and verified.
 3. PaperBridge QR protocol — implemented and verified.
 4. Multilingual communication — implemented and verified.
-5. Two-way QR task lifecycle — planned.
+5. Two-way QR task lifecycle — implemented and verified.
 6. Local Wi-Fi communication — planned.
 7. Offline queue and synchronization — planned.
 8. PWA and mobile readiness — planned.
 9. Final UI and mission control — planned.
 10. Testing and demo preparation — planned.
 
-See [implementation-plan.md](docs/implementation-plan.md), [architecture.md](docs/architecture.md), [paperbridge-protocol.md](docs/paperbridge-protocol.md), and [multilingual-protocol.md](docs/multilingual-protocol.md) for boundaries and technical details.
+See [implementation-plan.md](docs/implementation-plan.md), [architecture.md](docs/architecture.md), [paperbridge-protocol.md](docs/paperbridge-protocol.md), [synchronization-protocol.md](docs/synchronization-protocol.md), and [multilingual-protocol.md](docs/multilingual-protocol.md) for boundaries and technical details.
 
 ## Verification results
 
 Verified through 25 October 2026 with Node 24.15.0, npm 11.12.1, and Chromium on Windows:
 
-| Check                       | Actual result                                                                                                                      |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Dependency installation     | Passed; zero vulnerabilities reported by npm                                                                                       |
-| `npm run dev`               | Both workspace servers started; frontend returned HTTP 200                                                                         |
-| Live `GET /health`          | HTTP 200 with `{ "status": "ok", "service": "relay-miden-server", "phase": 2 }`                                                    |
-| `npm run typecheck`         | Passed for web, server, and shared with zero errors                                                                                |
-| `npm run lint`              | Passed with zero warnings                                                                                                          |
-| `npm test`                  | 80 tests passed across 6 files, including dictionary, template, legacy, and structured PaperBridge round-trip coverage             |
-| `npm run build`             | Shared/server TypeScript builds and production Vite build passed                                                                   |
-| `npm run test:e2e`          | 16 Playwright tests passed: responsive routes, legacy CRUD, language persistence, structured previews, and PaperBridge transfer    |
-| Responsive coverage         | Verified across 7 viewport widths without horizontal overflow or uncaught page errors                                              |
-| Multi-device QR transfer    | Verified end-to-end task export, image upload, decoding, pre-import review, and persistence across isolated browser contexts       |
-| Duplicate suppression       | Rescanning same QR code displays "Task Already Present" without creating duplicate tasks or duplicate operation logs               |
-| Offline CRUD & Persistence  | Task creation, inline edit, status updates, reopen, and soft deletion persist across browser reloads in IndexedDB                  |
-| Reactive Dashboard          | Dashboard counters and recent tasks update reactively via `useLiveQuery` without backend calls                                     |
-| Palette and indicator fills | Exact rendered palette verified; metric, priority, and status backgrounds transparent; brand hex values centralized in palette.css |
-| `npm run format:check`      | Passed with 100% Prettier compliance                                                                                               |
+| Check                       | Actual result                                                                                                                       |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Dependency installation     | Passed; zero vulnerabilities reported by npm                                                                                        |
+| `npm run dev`               | Both workspace servers started; frontend returned HTTP 200                                                                          |
+| Live `GET /health`          | HTTP 200 with `{ "status": "ok", "service": "relay-miden-server", "phase": 2 }`                                                     |
+| `npm run typecheck`         | Passed for web, server, and shared with zero errors                                                                                 |
+| `npm run lint`              | Passed with zero warnings                                                                                                           |
+| `npm test`                  | 94 tests passed across 7 files, including Phase 2–4 regressions and Phase 5 update, ACK, conflict, migration, and rollback coverage |
+| `npm run build`             | Shared/server TypeScript builds and production Vite build passed                                                                    |
+| `npm run test:e2e`          | 18 Playwright tests passed: responsive routes, CRUD, languages, v1 task transfer, v2 update/ACK exchange, and conflict convergence  |
+| Responsive coverage         | Verified across 7 viewport widths without horizontal overflow or uncaught page errors                                               |
+| Multi-device QR transfer    | Verified end-to-end task export, image upload, decoding, pre-import review, and persistence across isolated browser contexts        |
+| Duplicate suppression       | Rescanning same QR code displays "Task Already Present" without creating duplicate tasks or duplicate operation logs                |
+| Offline CRUD & Persistence  | Task creation, inline edit, status updates, reopen, and soft deletion persist across browser reloads in IndexedDB                   |
+| Reactive Dashboard          | Dashboard counters and recent tasks update reactively via `useLiveQuery` without backend calls                                      |
+| Palette and indicator fills | Exact rendered palette verified; metric, priority, and status backgrounds transparent; brand hex values centralized in palette.css  |
+| `npm run format:check`      | Passed with 100% Prettier compliance                                                                                                |
+
+The production bundle passes, with Vite's existing advisory that the main JavaScript chunk exceeds 500 kB. Camera scanning on physical devices has not been manually verified this execution; the automated browser suite transfers generated PNGs through the local image-upload path.
 
 ## Known limitations
 
 - Camera scanning requires HTTPS or localhost due to standard browser security policies on `getUserMedia`. Users accessing over an unencrypted local IP HTTP network must use the QR Image Upload option.
 - Single QR payloads are capped at 2,048 bytes to ensure reliable scanning on mobile camera viewfinders.
+- Several local edits require individual QR transfers in revision order. A missing operation is rejected and must be transferred before retrying the dependent update; this phase does not provide a durable deferred inbox or automatic delivery.
+- Conflict resolution supports choosing either complete branch. It does not offer field-by-field merging. The app cannot authenticate QR senders; device IDs and checksums are not signatures.
+- Legacy v1 task snapshots can act as shared ancestry for subsequent v2 edits. Historical operations that predate causal IDs are retained unchanged; the protocol never fabricates missing parent records.
 - Connectivity cards remain demonstration status indicators; live LAN detection and Wi-Fi sync arrive in Phase 6.
 - Full service worker caching and offline startup installation arrive in Phase 8 (PWA).
 - Structured task codes and selected workflow UI are translated locally. Arbitrary locations and notes remain in the original language, by design; this phase does not claim free-form translation.
@@ -218,5 +242,6 @@ Every Codex execution must update this README and create a unique, immutable Mar
 - [Phase 2 recovery and verification — 2026-10-24](docs/history/phase-02-recovery-20261024T153500Z-a7f3c2.md)
 - [Phase 3 PaperBridge QR communication and verification — 2026-10-24](docs/history/phase-03-20261024T173000Z-d4e8c1.md)
 - [Phase 4 multilingual communication audit, fixes, and verification — 2026-10-25](docs/history/phase-04-20261024T185518Z-b1e5d9.md)
+- [Phase 5 bidirectional PaperBridge synchronization and verification — 2026-10-25](docs/history/phase-05-20261024T193303Z-1590d1.md)
 
-No Git commands were executed during Phase 1, Phase 2, Phase 3, or Phase 4. The original MIT [LICENSE](LICENSE) is preserved.
+No Git commands were executed during Phase 1, Phase 2, Phase 3, Phase 4, or Phase 5. The original MIT [LICENSE](LICENSE) is preserved.

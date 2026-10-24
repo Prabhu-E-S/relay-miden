@@ -11,11 +11,13 @@ import {
 } from 'lucide-react';
 import { Html5Qrcode } from 'html5-qrcode';
 import {
-  decodePaperBridgeMessage,
+  decodeAnyPaperBridgeMessage,
   PaperBridgeError,
   scanQRCodeFromImageFile,
-  type PaperBridgeEnvelope,
+  type AnyPaperBridgeEnvelope,
 } from '../../services/paperbridge';
+import { QRMessageDisplay } from './QRMessageDisplay';
+import { syncRepository, type IncomingUpdateResult } from '../../services/sync/sync-repository';
 import { taskRepository, type ImportTaskResult } from '../../db/task-repository';
 import { PriorityIndicator } from '../tasks/PriorityIndicator';
 import { actionLabels, formatDateTime } from '../../lib/task-display';
@@ -30,8 +32,12 @@ export function QRReceiver() {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [pendingEnvelope, setPendingEnvelope] = useState<PaperBridgeEnvelope | null>(null);
+  const [pendingEnvelope, setPendingEnvelope] = useState<AnyPaperBridgeEnvelope | null>(null);
   const [importResult, setImportResult] = useState<ImportTaskResult | null>(null);
+  const [syncResult, setSyncResult] = useState<
+    IncomingUpdateResult | { status: 'ACK_RECORDED' | 'ACK_DUPLICATE' } | null
+  >(null);
+  const [ackRawJson, setAckRawJson] = useState('');
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -134,7 +140,7 @@ export function QRReceiver() {
     setValidationError(null);
 
     try {
-      const envelope = await decodePaperBridgeMessage(rawContent);
+      const envelope = await decodeAnyPaperBridgeMessage(rawContent);
       setPendingEnvelope(envelope);
       setStep('preview');
     } catch (err) {
@@ -180,8 +186,25 @@ export function QRReceiver() {
     setValidationError(null);
 
     try {
-      const result = await taskRepository.importPaperBridgeTask(pendingEnvelope);
-      setImportResult(result);
+      if (pendingEnvelope.version === 1) {
+        const result = await taskRepository.importPaperBridgeTask(pendingEnvelope);
+        setImportResult(result);
+      } else if (pendingEnvelope.messageType === 'TASK_UPDATE') {
+        const result = await syncRepository.applyIncomingUpdate(pendingEnvelope);
+        setSyncResult(result);
+        if (result.status === 'APPLIED' || result.status === 'ALREADY_APPLIED') {
+          try {
+            const ack = await syncRepository.createAcknowledgment(pendingEnvelope, result.status);
+            setAckRawJson(ack.rawJson);
+          } catch {
+            // A different message ID may repeat the same operation. Never issue a false ACK.
+            setAckRawJson('');
+          }
+        }
+      } else {
+        const result = await syncRepository.recordAcknowledgment(pendingEnvelope);
+        setSyncResult({ status: result === 'RECORDED' ? 'ACK_RECORDED' : 'ACK_DUPLICATE' });
+      }
       setStep('result');
     } catch (err) {
       if (err instanceof PaperBridgeError) {
@@ -206,6 +229,8 @@ export function QRReceiver() {
     stopCameraScanner();
     setPendingEnvelope(null);
     setImportResult(null);
+    setSyncResult(null);
+    setAckRawJson('');
     setValidationError(null);
     setCameraError(null);
     setStep('select');
@@ -364,7 +389,75 @@ export function QRReceiver() {
       )}
 
       {/* Step 3: Decoded Task Preview & Confirmation */}
-      {step === 'preview' && pendingEnvelope && (
+      {step === 'preview' && pendingEnvelope?.version === 2 && (
+        <div>
+          <h2 className="text-base font-semibold">
+            {pendingEnvelope.messageType === 'TASK_UPDATE'
+              ? 'Review Task Update'
+              : 'Review Acknowledgment'}
+          </h2>
+          {pendingEnvelope.messageType === 'TASK_UPDATE' ? (
+            <div className="mt-4 rounded-lg border border-line bg-surface p-4 text-xs">
+              <p>
+                Task {pendingEnvelope.payload.taskId.slice(0, 8)} · revision{' '}
+                {pendingEnvelope.payload.baseRevision} → {pendingEnvelope.payload.nextRevision}
+              </p>
+              <p className="mt-2">
+                From device <span className="break-all font-mono">{pendingEnvelope.senderId}</span>
+              </p>
+              <dl className="mt-3 grid gap-2 border-t border-line pt-3">
+                {Object.entries(pendingEnvelope.payload.changes).map(([field, value]) => (
+                  <div key={field}>
+                    <dt className="font-semibold">{field}</dt>
+                    <dd className="break-words text-muted">
+                      {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              {pendingEnvelope.payload.resolution && (
+                <p className="mt-3 text-warning">This update resolves a prior conflict.</p>
+              )}
+            </div>
+          ) : (
+            <div className="mt-4 rounded-lg border border-line bg-surface p-4 text-xs">
+              <p>Message {pendingEnvelope.payload.acknowledgedMessageId.slice(0, 8)}</p>
+              <p className="mt-2">
+                Task revision {pendingEnvelope.payload.appliedRevision} ·{' '}
+                {pendingEnvelope.payload.result}
+              </p>
+              <p className="mt-2 break-all">Receiver {pendingEnvelope.payload.receiverDeviceId}</p>
+            </div>
+          )}
+          <p className="mt-3 text-xs text-muted">
+            Verify this message before saving it locally. A checksum checks integrity, not sender
+            identity.
+          </p>
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              className="button-secondary justify-center"
+              onClick={handleCancelPreview}
+            >
+              {dict.form.cancelButton}
+            </button>
+            <button
+              type="button"
+              className="button-primary justify-center"
+              disabled={isProcessing}
+              onClick={() => void handleConfirmImport()}
+            >
+              {isProcessing
+                ? 'Saving…'
+                : pendingEnvelope.messageType === 'TASK_UPDATE'
+                  ? 'Apply Update'
+                  : 'Record Acknowledgment'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 'preview' && pendingEnvelope?.version === 1 && (
         <div>
           <div className="mb-4 flex items-center gap-2 text-brand">
             <SquareCheck size={20} className="text-brand" />
@@ -561,6 +654,70 @@ export function QRReceiver() {
               </div>
             </div>
           )}
+        </div>
+      )}
+      {step === 'result' && syncResult && (
+        <div>
+          <h2 className="text-base font-semibold">
+            {syncResult.status === 'APPLIED'
+              ? 'Task Update Applied'
+              : syncResult.status === 'ALREADY_APPLIED'
+                ? 'Update Already Applied'
+                : syncResult.status === 'CONFLICT'
+                  ? 'Resolve Task Conflict'
+                  : syncResult.status === 'ACK_RECORDED'
+                    ? 'Acknowledgment Recorded'
+                    : syncResult.status === 'ACK_DUPLICATE'
+                      ? 'Acknowledgment Already Recorded'
+                      : syncResult.status === 'MISSING_PARENT'
+                        ? 'Earlier Update Needed'
+                        : 'Update Not Applied'}
+          </h2>
+          {'message' in syncResult && (
+            <p className="mt-2 text-xs text-muted">{syncResult.message}</p>
+          )}
+          {syncResult.status === 'CONFLICT' && (
+            <>
+              <p className="mt-2 text-xs text-muted">
+                Local task unchanged. Both branches were saved for review.
+              </p>
+              <Link
+                to={`/tasks/${syncResult.conflict.taskId}`}
+                className="button-primary mt-4 w-full justify-center"
+              >
+                Resolve Conflict
+              </Link>
+            </>
+          )}
+          {(syncResult.status === 'APPLIED' || syncResult.status === 'ALREADY_APPLIED') &&
+            ackRawJson && (
+              <>
+                <p className="mt-3 text-xs text-muted">
+                  Show this return QR to the sending device so it can mark the transfer
+                  acknowledged.
+                </p>
+                <QRMessageDisplay
+                  rawJson={ackRawJson}
+                  label="Acknowledgment"
+                  filename={`relay-miden-ack-${syncResult.messageId.slice(0, 8)}.png`}
+                />
+              </>
+            )}
+          {(syncResult.status === 'APPLIED' || syncResult.status === 'ALREADY_APPLIED') && (
+            <Link
+              to={`/tasks/${syncResult.task.id}`}
+              className="button-secondary mt-4 w-full justify-center"
+            >
+              View Task
+            </Link>
+          )}
+          <button
+            type="button"
+            className="button-secondary mt-3 w-full justify-center"
+            onClick={handleReset}
+          >
+            Scan Another
+          </button>
         </div>
       )}
     </div>

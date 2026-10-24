@@ -82,6 +82,7 @@ export const TaskOperationTypeSchema = z.enum([
   'TASK_UPDATE',
   'TASK_DELETE',
   'TASK_IMPORT',
+  'TASK_RESOLVE',
 ]);
 export const TaskOperationSchema = z.object({
   operationId: z.uuid(),
@@ -93,6 +94,12 @@ export const TaskOperationSchema = z.object({
   parentRevision: z.number().int().nonnegative().nullable(),
   payload: TaskSchema,
   messageId: z.uuid().optional(),
+  parentOperationId: z.uuid().nullable().optional(),
+  mergedOperationId: z.uuid().optional(),
+  mergedStateHash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
 });
 
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
