@@ -3,7 +3,7 @@ import { useLanSync } from '../../hooks/use-lan-sync';
 import { usePwa } from '../../hooks/use-pwa';
 
 export function ConnectionStatus() {
-  const { offlineReady, isStandalone } = usePwa();
+  const { offlineReady, isStandalone, swRegistrationError } = usePwa();
   const {
     status,
     lastError,
@@ -157,8 +157,19 @@ export function ConnectionStatus() {
             <Smartphone size={19} aria-hidden="true" />
             PWA Shell
           </dt>
-          <dd className="status-label text-right text-[11px] text-brand">
-            {offlineReady ? (
+          <dd
+            className={`status-label text-right text-[11px] ${
+              swRegistrationError ? 'text-danger' : offlineReady ? 'text-brand' : 'text-muted'
+            }`}
+          >
+            {swRegistrationError ? (
+              <>
+                Cache error
+                <span className="block max-w-36 text-[10px] text-muted">
+                  Offline launch unavailable
+                </span>
+              </>
+            ) : offlineReady ? (
               <>
                 Ready offline
                 <span className="block text-[10px] text-muted">
