@@ -35,9 +35,7 @@ export function Sidebar() {
           <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-sidebar-muted)]">
             Tasks are saved locally in IndexedDB.
           </p>
-          <p className="mt-3 text-[10px] uppercase tracking-[.13em] text-[var(--color-sidebar-muted)]">
-            Phase 08 · PWA & Offline Launch
-          </p>
+        
         </div>
       </div>
     </aside>

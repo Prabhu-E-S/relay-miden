@@ -37,6 +37,7 @@ export function ConnectionsPage() {
     isReconnecting,
     isSyncing,
     syncMessage,
+    syncMessageIsError,
     connect,
     disconnect,
     reconnectNow,
@@ -172,8 +173,10 @@ export function ConnectionsPage() {
 
               {syncMessage && (
                 <div
-                  className="rounded border border-line bg-surface p-3 text-xs text-brand"
-                  role="status"
+                  className={`rounded border border-line bg-surface p-3 text-xs ${
+                    syncMessageIsError ? 'text-danger' : 'text-brand'
+                  }`}
+                  role={syncMessageIsError ? 'alert' : 'status'}
                 >
                   <p className="font-semibold">Sync Status</p>
                   <p className="mt-0.5 text-muted">{syncMessage}</p>

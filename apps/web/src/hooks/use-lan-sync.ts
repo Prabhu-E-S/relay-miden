@@ -20,6 +20,7 @@ export function useLanSync() {
   const [state, setState] = useState<LanConnectionState>(lanSyncClient.getState());
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [syncMessageIsError, setSyncMessageIsError] = useState(false);
 
   const outboxStats = useLiveQuery(() => getOutboxStats(), [], DEFAULT_OUTBOX_STATS);
 
@@ -31,21 +32,25 @@ export function useLanSync() {
 
   const connect = useCallback(async (url?: string, token?: string) => {
     setSyncMessage(null);
+    setSyncMessageIsError(false);
     return lanSyncClient.connect(url, token);
   }, []);
 
   const disconnect = useCallback(() => {
     setSyncMessage(null);
+    setSyncMessageIsError(false);
     lanSyncClient.disconnect();
   }, []);
 
   const reconnectNow = useCallback(async () => {
     setSyncMessage(null);
+    setSyncMessageIsError(false);
     return lanSyncClient.reconnectNow();
   }, []);
 
   const retryBlockedAndFailed = useCallback(async () => {
     setSyncMessage(null);
+    setSyncMessageIsError(false);
     const count = await lanSyncClient.retryBlockedAndFailed();
     if (count > 0) {
       setSyncMessage(`Re-queued ${count} blocked or failed operation(s).`);
@@ -66,6 +71,7 @@ export function useLanSync() {
   const syncNow = useCallback(async () => {
     setIsSyncing(true);
     setSyncMessage(null);
+    setSyncMessageIsError(false);
     try {
       const res = await lanSyncClient.syncNow();
       if (res.success) {
@@ -73,9 +79,11 @@ export function useLanSync() {
           `Synchronized successfully (${res.operationsApplied ?? 0} operations applied, ${res.outboxReplayed ?? 0} outbox replayed).`,
         );
       } else {
+        setSyncMessageIsError(true);
         setSyncMessage(res.error ?? 'Sync failed.');
       }
     } catch (err) {
+      setSyncMessageIsError(true);
       setSyncMessage(err instanceof Error ? err.message : 'Sync failed.');
     } finally {
       setIsSyncing(false);
@@ -101,6 +109,7 @@ export function useLanSync() {
     isReconnecting: state.status === 'RECONNECTING',
     isSyncing,
     syncMessage,
+    syncMessageIsError,
     connect,
     disconnect,
     reconnectNow,
