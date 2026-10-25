@@ -136,6 +136,14 @@ export async function applyIncomingLanOperation(
     }
 
     if (existingTask) {
+      const existingHash = await taskStateHash(existingTask);
+      if (existingHash !== operation.resultStateHash) {
+        return {
+          status: 'CONFLICT',
+          task: existingTask,
+          message: 'A task with this ID exists locally with different content.',
+        };
+      }
       await recordServerAcceptance(operation.operationId, undefined, database);
       return { status: 'ALREADY_APPLIED', task: existingTask };
     }

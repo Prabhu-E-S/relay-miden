@@ -7,6 +7,7 @@ import {
   FileUp,
   RotateCcw,
   SquareCheck,
+  SwitchCamera,
   XCircle,
 } from 'lucide-react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
@@ -24,6 +25,7 @@ import { actionLabels, formatDateTime } from '../../lib/task-display';
 import { useLanguage } from '../../hooks/use-language';
 
 type ReceiverStep = 'select' | 'camera' | 'preview' | 'result';
+type CameraFacingMode = 'environment' | 'user';
 
 export function QRReceiver() {
   const { dict, formatTask } = useLanguage();
@@ -38,6 +40,7 @@ export function QRReceiver() {
     IncomingUpdateResult | { status: 'ACK_RECORDED' | 'ACK_DUPLICATE' } | null
   >(null);
   const [ackRawJson, setAckRawJson] = useState('');
+  const [facingMode, setFacingMode] = useState<CameraFacingMode>('environment');
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -71,7 +74,7 @@ export function QRReceiver() {
     setCameraActive(false);
   }
 
-  async function startCameraScanner() {
+  async function startCameraScanner(cameraFacingMode: CameraFacingMode = facingMode) {
     setCameraError(null);
     setValidationError(null);
     setStep('camera');
@@ -101,7 +104,7 @@ export function QRReceiver() {
       scannerRef.current = html5QrCode;
 
       await html5QrCode.start(
-        { facingMode: 'environment' },
+        { facingMode: cameraFacingMode },
         {
           // Do not crop to a small decoder box. PaperBridge carries a signed
           // task envelope, which can produce a denser QR than a URL.
@@ -143,6 +146,12 @@ export function QRReceiver() {
         );
       }
     }
+  }
+
+  async function flipCamera() {
+    const nextFacingMode: CameraFacingMode = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(nextFacingMode);
+    await startCameraScanner(nextFacingMode);
   }
 
   async function handleRawDecodedText(rawContent: string) {
@@ -369,13 +378,23 @@ export function QRReceiver() {
             )}
           </div>
 
-          <div className="mt-4 flex gap-3">
+          <div className="mt-4 grid grid-cols-3 gap-3">
             <button
               type="button"
               onClick={handleReset}
               className="button-secondary w-full justify-center"
             >
               {dict.paperbridge.cancelCamera}
+            </button>
+            <button
+              type="button"
+              onClick={() => void flipCamera()}
+              disabled={Boolean(cameraError)}
+              className="button-secondary w-full justify-center"
+              aria-label="Switch between rear and front camera"
+            >
+              <SwitchCamera size={16} />
+              Flip
             </button>
             <button
               type="button"

@@ -19,7 +19,10 @@ export function SendPage() {
   const allTasks = useLiveQuery(() => db.tasks.toArray(), []);
   const [deviceId, setDeviceId] = useState<string>();
   const requestedId = params.get('task');
-  const [mode, setMode] = useState<SendMode>(params.get('mode') === 'update' ? 'update' : 'task');
+  const requestedMode = params.get('mode');
+  const [mode, setMode] = useState<SendMode>(
+    requestedMode === 'update' || requestedMode === 'ack' ? requestedMode : 'task',
+  );
   const tasks = allTasks?.filter((item) => mode === 'update' || !item.deletedAt);
   const task = tasks?.find((item) => item.id === requestedId) ?? tasks?.[0] ?? allTasks?.[0];
   const operations = useLiveQuery(
@@ -36,16 +39,21 @@ export function SendPage() {
   const [selectedAcknowledgment, setSelectedAcknowledgment] = useState('');
   const [encoded, setEncoded] = useState<{ rawJson: string; messageId: string } | null>(null);
   const [exportError, setExportError] = useState('');
+  // A task that has changed locally must be shared as its durable operation,
+  // not as a legacy v1 task snapshot. A v1 snapshot has no operation identity
+  // and an existing receiver cannot safely infer which change it represents.
+  const effectiveMode: SendMode =
+    requestedMode === null && mode === 'task' && operations?.length ? 'update' : mode;
 
   useEffect(() => {
-    if (!task || mode === 'task') return;
+    if (!task || effectiveMode === 'task') return;
     let active = true;
     const selected =
-      mode === 'update'
+      effectiveMode === 'update'
         ? selectedOperation || defaultOperation?.operationId
         : selectedAcknowledgment || acknowledgable?.[0]?.messageId;
     if (!selected) return;
-    (mode === 'update'
+    (effectiveMode === 'update'
       ? syncRepository.createOutgoingTaskUpdate(task.id, selected)
       : syncRepository.createAcknowledgmentForMessage(selected)
     )
@@ -66,7 +74,7 @@ export function SendPage() {
     };
   }, [
     task,
-    mode,
+    effectiveMode,
     selectedOperation,
     selectedAcknowledgment,
     defaultOperation,
@@ -144,18 +152,22 @@ export function SendPage() {
                 key={value}
                 onClick={() => {
                   setMode(value);
+                  if (value === 'update') setParams({ task: task.id, mode: 'update' });
+                  else setParams({ task: task.id, mode: value });
                   setEncoded(null);
                   setExportError('');
                 }}
-                aria-pressed={mode === value}
-                className={mode === value ? 'button-primary text-xs' : 'button-secondary text-xs'}
+                aria-pressed={effectiveMode === value}
+                className={
+                  effectiveMode === value ? 'button-primary text-xs' : 'button-secondary text-xs'
+                }
               >
                 {label}
               </button>
             ))}
           </div>
           {deviceId ? (
-            mode === 'task' ? (
+            effectiveMode === 'task' ? (
               task.deletedAt ? (
                 <p className="mt-4 text-xs text-muted">
                   Deleted tasks cannot be sent as new task QRs. Choose Send Update.
@@ -165,7 +177,7 @@ export function SendPage() {
               )
             ) : (
               <div>
-                {mode === 'update' ? (
+                {effectiveMode === 'update' ? (
                   operations?.length ? (
                     <label className="field mt-4">
                       Choose a local change (send in revision order)
@@ -221,8 +233,8 @@ export function SendPage() {
                 {encoded && !exportError && (
                   <QRMessageDisplay
                     rawJson={encoded.rawJson}
-                    label={mode === 'update' ? 'Task update' : 'Acknowledgment'}
-                    filename={`relay-miden-${mode}-${encoded.messageId.slice(0, 8)}.png`}
+                    label={effectiveMode === 'update' ? 'Task update' : 'Acknowledgment'}
+                    filename={`relay-miden-${effectiveMode}-${encoded.messageId.slice(0, 8)}.png`}
                   />
                 )}
               </div>

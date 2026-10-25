@@ -118,7 +118,11 @@ export class LanConnectionManager {
 
   setServerUrl(url: string): void {
     const trimmed = url.trim();
+    const changed = trimmed !== this.state.serverUrl;
     writeStorage(STORAGE_KEYS.SERVER_URL, trimmed);
+    if (changed) {
+      writeStorage(STORAGE_KEYS.SYNC_CURSOR, '0');
+    }
     this.updateState({
       serverUrl: trimmed,
       status: trimmed
@@ -127,6 +131,7 @@ export class LanConnectionManager {
           : 'DISCONNECTED'
         : 'NOT_CONFIGURED',
       lastError: null,
+      ...(changed ? { serverSequence: 0, lastSyncAt: null } : {}),
     });
   }
 
