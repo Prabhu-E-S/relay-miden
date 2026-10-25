@@ -241,3 +241,11 @@ If two devices diverge from revision `N`:
 - **Offline Independence**: Local task creation and edits never block on network connectivity. If the server is offline, tasks commit locally in IndexedDB.
 - **PaperBridge Compatibility**: Tasks transferred via QR and tasks synced over LAN share the identical UUIDs, revisions, and state hashes. An operation received via QR and later observed via LAN is recognized idempotently (`ALREADY_APPLIED`), preventing duplicates.
 - **Phase 7 Readiness**: Clean interfaces are exposed for listing unsynchronized local operations (`getUnsynchronizedOperations`), submitting by stable ID (`submitLocalOperation`), and tracking server cursors.
+
+## 9. Repair guarantees and operator behavior
+
+- A configured coordinator change resets the client cursor to `0`, preventing checkpoints from one SQLite history from being used with another server.
+- The **Connect & Sync** control saves the visible coordinator configuration, reconnects and registers when disconnected, replays eligible causal outbox entries, retrieves remote entries, and performs the existing follow-up catch-up pass.
+- A UI success result means the final outbox has no `PENDING`, `IN_FLIGHT`, `BLOCKED`, or `FAILED` entries. Other states are shown as action-required partial completion.
+- For an incoming `TASK_CREATE`, an existing operation ID is idempotent. An existing task ID is idempotent only when its state hash matches; a mismatched state hash is an integrity conflict.
+- `TASK_UPDATE` delivery is applied by the same causal update engine used by PaperBridge, preserving missing-parent and conflict behavior across transports.

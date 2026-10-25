@@ -89,10 +89,20 @@ Phase 8 completes the offline launch and installability layer for Relay Miden:
 - Anonymous UUIDs provide causal attribution, not proof of identity. For trusted LANs, an optional session token restricts server access.
 - Mobile browsers require secure contexts (HTTPS or localhost) for `getUserMedia` camera access and PWA installation. The project provides automated TLS certificate generation (`npm run cert:gen`) to establish secure contexts over LAN Wi-Fi. In insecure contexts, the image file upload fallback remains active.
 - Mobile browsers can restrict `crypto.randomUUID()` on an HTTP LAN origin even though IndexedDB is available. Shared UUID generation uses `crypto.getRandomValues()` as a cryptographically secure UUID v4 fallback so device identity and local storage work on any address.
+- PaperBridge checksums and task-state hashes use Web Crypto when available. A tested, bundled SHA-256 fallback produces the same digest on restricted HTTP LAN development origins where `crypto.subtle` is absent, preserving QR integrity verification before import.
 - The camera scanner requests the rear camera with a preferred 1280×720 stream and decodes the full camera frame. This preserves enough QR modules for PaperBridge's signed task envelopes when a phone scans a laptop display.
+- The Receive via QR camera view includes a user-activated front/rear camera switch for devices whose rear camera focus is unsuitable for the displayed code.
 - Mixed-content policies block unencrypted HTTP/WS connections when web apps are served over HTTPS. Relay Miden configures both frontend and backend for HTTPS/WSS when TLS mode is enabled.
 - Local SQLite database files and TLS private keys are excluded from version control (`.gitignore`).
 
 ## Verification boundaries
 
 Vitest exercises form validation, multilingual templates, PaperBridge v1/v2 QR encoding/decoding, the Express health endpoint, `TaskRepository` against `fake-indexeddb`, causal classification, ACK matching, conflict resolution, SQLite migrations, server Socket.IO operations, client LAN synchronization, durable outbox atomic insertion, queue state machine transitions, abandoned in-flight recovery, exponential backoff, causal replay, lost acknowledgment recovery, concurrent conflict convergence, PWA manifest invariants, Service Worker caching rules, HTTPS LAN server instantiation, and IndexedDB data preservation during app shell updates (135 tests total across 11 test suites). Playwright exercises built frontend routes across 7 viewports without overflow, task creation/editing/status lifecycle, PaperBridge transfer, concurrent conflict convergence, Connections page configuration, Phase 7 outbox queue indicators, Phase 8 PWA manifest metadata, and offline network simulation with local task navigation (22 tests total). Physical multi-device LAN synchronization has not been verified in Phase 8.
+
+## Synchronization repair verification (25 October 2026)
+
+PaperBridge and LAN retain one causal operation model. A task's existence is never used as a reason to discard a new `TASK_UPDATE`: QR imports route through `SyncRepository.applyIncomingTaskUpdatePayload`, and LAN updates use that same method. The Send screen selects durable local operations for edited imported tasks, retaining operation IDs and causal ancestry on re-export.
+
+Manual LAN synchronization is a real reconciliation transaction at the client boundary: it persists the operator-entered address/token, reconnects when necessary, fetches missing server operations, replays eligible outbox operations, performs a follow-up fetch, and reports partial completion whenever pending, in-flight, blocked, or failed local operations remain. A changed LAN server URL resets the per-server cursor before reconciliation. For task-creation identity collisions, the LAN receiver compares state hashes and returns a conflict when a matching task ID has different contents.
+
+See [synchronization-repair-testing.md](synchronization-repair-testing.md) for the physical-device validation procedure.
