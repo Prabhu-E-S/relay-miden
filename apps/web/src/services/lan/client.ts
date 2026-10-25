@@ -102,23 +102,52 @@ export class LanSyncClient {
     success: boolean;
     operationsApplied?: number | undefined;
     outboxReplayed?: number | undefined;
+    pending?: number | undefined;
+    blocked?: number | undefined;
+    failed?: number | undefined;
     error?: string | undefined;
   }> {
-    if (!lanConnection.isConnected()) {
-      return { success: false, error: 'LAN server is not connected.' };
-    }
-
     if (this.isSyncing) {
       return { success: false, error: 'Synchronization already in progress.' };
     }
 
     this.isSyncing = true;
     try {
+      if (!lanConnection.isConnected()) {
+        if (!lanConnection.getServerUrl()) {
+          return { success: false, error: 'Set a LAN server address before syncing.' };
+        }
+        const reconnected = await lanConnection.reconnectNow();
+        if (!reconnected) {
+          return {
+            success: false,
+            error: lanConnection.getState().lastError ?? 'Could not connect to the LAN server.',
+          };
+        }
+      }
       const result = await requestLanSync();
+      const outbox = await getOutboxStats();
+      const unresolved = outbox.pending + outbox.inFlight + outbox.blocked + outbox.failed;
+
+      if (unresolved > 0) {
+        return {
+          success: false,
+          operationsApplied: result.operationsApplied,
+          outboxReplayed: result.outboxReplayed,
+          pending: outbox.pending + outbox.inFlight,
+          blocked: outbox.blocked,
+          failed: outbox.failed,
+          error: `Sync completed, but ${unresolved} local operation(s) still need attention.`,
+        };
+      }
+
       return {
         success: true,
         operationsApplied: result.operationsApplied,
         outboxReplayed: result.outboxReplayed,
+        pending: 0,
+        blocked: 0,
+        failed: 0,
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Synchronization failed.';

@@ -57,6 +57,14 @@ export function ConnectionsPage() {
     await connect(inputUrl, inputToken);
   };
 
+  const handleManualSync = async () => {
+    // Manual sync is a recovery action: persist the edited connection values
+    // before asking the client to reconnect and reconcile both directions.
+    setServerUrl(inputUrl);
+    setSessionToken(inputToken);
+    await syncNow();
+  };
+
   const handleRetryQueue = async () => {
     setIsRetryingQueue(true);
     try {
@@ -203,16 +211,16 @@ export function ConnectionsPage() {
 
                 <button
                   type="button"
-                  onClick={syncNow}
+                  onClick={handleManualSync}
                   className="button-secondary"
-                  disabled={!isConnected || isSyncing}
+                  disabled={isSyncing || !inputUrl.trim()}
                 >
                   <RefreshCw
                     size={16}
                     className={isSyncing ? 'animate-spin' : ''}
                     aria-hidden="true"
                   />
-                  {isSyncing ? 'Synchronizing...' : 'Sync Now'}
+                  {isSyncing ? 'Synchronizing...' : isConnected ? 'Sync Now' : 'Connect & Sync'}
                 </button>
               </div>
             </form>
