@@ -1,159 +1,269 @@
 # Relay Miden
 
-**When networks fail, communication shouldn't.**
+> **When networks fail, communication shouldn't.**
 
-Relay Miden is an offline-first, multilingual task-coordination project for the **Works Anyway** track at **Devin Hacks Kochi**. Communities still need to request supplies, coordinate volunteers, and report problems when infrastructure fails. The product is being designed around three constraints: **no internet connection, no shared network between devices, and no common language between users**.
+Relay Miden is an offline-first, multilingual task-coordination platform built for the **Works Anyway** track at **Devin Hacks Kochi**. It helps communities create, exchange, update, and reconcile operational tasks when public internet access is unavailable, devices do not share a network, or participants do not share a language.
 
-## Current status
+The project uses local browser storage, optical QR transfer, and an optional local Wi-Fi coordinator. It requires no paid API, cloud database, user account, or internet connection for its core task workflows.
 
-**Phase 8 implemented and verified on 25 October 2026.** Relay Miden is now an installable Progressive Web App (PWA) with complete offline launch capabilities and secure LAN access for mobile devices. Static application shell assets (HTML, CSS, JavaScript, local DM Sans fonts, and PNG icons) are precached locally by a Workbox Service Worker, allowing the application to launch and navigate without network connectivity. Tasks, operation histories, and outbox queues persist durably in IndexedDB and are never flushed or cleared during application updates. The application supports installation on Android, Chromium, Desktop, and iOS (Safari Add to Home Screen) in standalone display mode. A non-intrusive update management system notifies users when new application versions are ready and preserves active user edits. Secure-context development tooling (`npm run cert:gen`, `npm run dev:https`) provides multi-IP SAN TLS certificates for mobile camera scanning and secure LAN synchronization over Socket.IO. Phases 1–7 remain 100% operational.
+## Release status
 
-### Implemented
 
-- **Progressive Web App, Offline Launch, Installability & Secure LAN (Phase 8)**:
-  - **W3C Web App Manifest**: Full specification compliance (`/manifest.webmanifest`) with `name: "Relay Miden"`, `short_name: "Relay Miden"`, `display: "standalone"`, `theme_color: "#004225"`, and `background_color: "#F5F5DC"`.
-  - **Installable Icon Suite**: 192×192 standard PNG, 512×512 high-resolution PNG, 512×512 maskable PNG (with 20% safe-padding margin for Android squircles), 180×180 Apple touch icon, and multi-size web favicons generated directly from the brand SVG geometry.
-  - **Workbox Service Worker Precaching**: Precaches 32 essential application shell assets (1,417 KiB total) including HTML, CSS, JavaScript bundles, local fonts, and icons.
-  - **Client-Side Navigation Fallback**: Returns `/index.html` for offline navigation while strictly excluding `/api/`, `/socket.io/`, and `/health/` via a navigation denylist.
-  - **Data Isolation & Storage Safety**: User tasks, operations, and Phase 7 outbox records remain strictly isolated in IndexedDB. Cache Storage is never used for task records, and local data is never cleared during updates.
-  - **PWA Installation Controls**: Intercepts `beforeinstallprompt` on Chromium/Android, provides user-initiated installation in Settings, respects prompt dismissal, detects standalone display mode, and displays iOS Safari Add to Home Screen instructions.
-  - **Safe Non-Intrusive Updates**: Background service worker updates display a persistent `<UpdateNotification />` banner guaranteeing local data safety and allowing manual reload activation.
-  - **Secure LAN HTTPS Tooling**: `scripts/generate-dev-cert.mjs` detects local IPv4 interfaces via `os.networkInterfaces()` and generates multi-IP SAN TLS certificates via `mkcert` or OpenSSL.
-  - **Secure LAN Server (`apps/server`)**: Conditional HTTPS and WSS Socket.IO support when TLS keys and certificates are supplied, preventing mixed-content blocking.
-  - **Mobile Camera Scanning Support**: Enables `navigator.mediaDevices.getUserMedia` live camera scanning on mobile phones connecting to the host machine over LAN Wi-Fi.
-  - **Dedicated Setup Guide**: [docs/pwa-offline-setup.md](docs/pwa-offline-setup.md) detailing Windows development setup, `ipconfig` host discovery, certificate installation, and mobile testing.
 
-- **LAN HTTP mobile-storage compatibility repair (25 October 2026)**:
-  - Browser-generated UUIDs now use `crypto.randomUUID()` when available and securely fall back to `crypto.getRandomValues()` on unencrypted LAN HTTP origins. This allows a phone opening Relay Miden through a same-Wi-Fi address to create its anonymous IndexedDB device identity.
-  - The local-storage screen now exposes the underlying database error when a browser still blocks IndexedDB, without clearing any data.
+| Area                                                                                         | Status                 | Evidence                                                                               |
+| -------------------------------------------------------------------------------------------- | ---------------------- | -------------------------------------------------------------------------------------- |
+| Local task creation, editing, status changes, search, filters, sorting, and soft deletion    | Verified               | Vitest repository tests and Playwright browser flows                                   |
+| IndexedDB persistence and anonymous device identity                                          | Verified               | Database reopen, migration, refresh, and browser persistence tests                     |
+| English, Malayalam, and Tamil structured task rendering                                      | Verified               | Dictionary, persistence, QR, and browser language tests                                |
+| PaperBridge `TASK_CREATE`, `TASK_UPDATE`, and `TASK_ACK`                                     | Verified               | Two isolated browser contexts, duplicate, ancestry, conflict, and acknowledgment tests |
+| LAN synchronization, SQLite persistence, durable outbox, replay, and manual Sync             | Verified in automation | Client/server Socket.IO integration and recovery tests                                 |
+| PWA manifest, app-shell caching, offline navigation, installation controls, and safe updates | Verified in automation | Manifest, Workbox, storage-safety, and offline browser tests                           |
+| Responsive UI                                                                                | Verified               | 320, 375, 390, 430, 768, 1024, and 1440 px browser coverage                            |
+| Physical phone camera, certificate trust, venue firewall, and two-device Wi-Fi               | Requires rehearsal     | Hardware and local-network conditions cannot be proven by desktop automation           |
 
-- **Mobile camera QR scanning reliability repair (25 October 2026)**:
-  - The in-app scanner now uses the full rear-camera frame at a preferred 1280×720 resolution instead of a 240px decode crop, and restricts detection to QR codes. Its camera selector uses the `html5-qrcode` required single `facingMode` constraint; resolution is supplied through video constraints.
-  - Task, update, and acknowledgment QR displays are larger on laptop and desktop layouts so their signed JSON envelopes retain readable module sizes for a phone camera.
+Latest verification:
 
-- **Durable Offline Queue, Automatic Reconnection & Recovery (Phase 7)**:
-  - **Durable Outbox Queue (IndexedDB Version 4)**: Persistent `outbox` table in Dexie with compound indices. Every local task operation (`TASK_CREATE`, `TASK_UPDATE`, `TASK_DELETE`, `TASK_RESOLVE`) commits atomically in the same database transaction as the task and operation log.
-  - **Queue State Machine**: Strict transitions (`PENDING` -> `IN_FLIGHT` -> `ACKNOWLEDGED` / `BLOCKED` / `FAILED`). Interrupted `IN_FLIGHT` operations recover automatically to `PENDING` on database open.
-  - **Automatic LAN Reconnection**: Autonomous exponential backoff (1s, 2s, 4s, 8s, 16s, capped at 30s) with $\pm 20\%$ random jitter to prevent reconnect storms. Browser `online` and `visibilitychange` lifecycle awareness.
-  - **Causal Operation Replay**: Strict parent-first dependency ordering ensures task creations and base revisions replay before dependent edits. Missing dependencies transition operations to `BLOCKED` without infinite retry loops.
-  - **Idempotent Replay & Lost Acknowledgment Recovery**: Retries carry stable canonical `operationId`s. The server returns `ALREADY_APPLIED`, and the client records durable acknowledgment without duplicating revisions.
-  - **Contiguous Cursor Safety**: Server cursors advance monotonically only after incoming operations successfully commit to local storage. Invalidation detection safely resets stale cursors if the server database was wiped or replaced.
-  - **Concurrent Conflict Reconciliation**: Offline concurrent edits trigger Phase 5 causal conflict detection upon reconnection, recording audit entries in `db.conflicts`. User resolutions generate canonical `TASK_RESOLVE` operations that replay over LAN.
-  - **Transport Provenance Isolation**: Remote tasks imported via PaperBridge QR are stored as `TASK_IMPORT` and never falsely enqueued into the local outbox.
-  - **Reactive Telemetry & Controls**: Dashboard displays live Offline Queue indicators; Connections page displays Outbox metrics (Pending, In Flight, Blocked / Error, Acknowledged) and a "Retry Blocked & Failed Operations" action.
+- **135/135 Vitest tests passed** across 11 test files.
+- **22/22 Playwright tests passed**.
+- Strict TypeScript, ESLint, Prettier, and all production builds passed.
+- Workbox generated a service worker with **32 precached assets (1,421.13 KiB)**.
+- Vite reports one non-blocking advisory: the primary minified JavaScript bundle exceeds 500 kB.
 
-- **Local Network Server & Real-Time LAN Synchronization (Phase 6)**:
-  - **Local Host Coordinator (`apps/server`)**: Node.js, Express, and Socket.IO server backed by persistent SQLite (`node:sqlite` `DatabaseSync`) running in WAL mode with foreign key enforcement. Configurable host binding (`0.0.0.0` or custom LAN IP) and optional session token authentication (`LAN_SESSION_TOKEN`).
-  - **Typed LAN Protocol (`LAN_PROTOCOL_VERSION = 1`)**: Socket.IO envelopes validated by Zod schemas (`device:register`, `sync:request`, `operation:submit`, `operation:accepted`, `operation:rejected`, `operation:broadcast`).
-  - **Durable Persistence Before Acknowledgment**: Operations are validated and committed atomically to SQLite before the server returns an acceptance response or broadcasts to peers.
-  - **Causal Model & Conflict Reuse**: Directly reuses Phase 5 `TaskUpdatePayload`, parent operation IDs, state hashing (`SHA-256`), and conflict detection. Concurrent edits are captured in conflict ledgers and resolved cleanly using `TASK_RESOLVE` operations.
-  - **Incremental & Catch-Up Sync**: Monotonic server sequence numbers allow connecting or returning clients to request missing operations from their last known cursor. Bounded batches prevent unbounded payloads.
-  - **Client LAN Sync Service (`apps/web/src/services/lan/`)**: Reactive Socket.IO client managing connection state, local storage persistence for host address and session tokens, real-time operation submission on task mutation, and manual "Sync Now" recovery.
-  - **Reactive Connection UI**: Dashboard and Connections page reflect live connection states (`Connected`, `Connecting...`, `Syncing...`, `Disconnected`, `Error`) with full responsiveness down to 320px viewports without horizontal overflow.
-  - **Mixed Transport & Offline First**: Local IndexedDB remains the primary offline datastore. Tasks transferred via PaperBridge QR and synced over LAN share identical IDs, preventing duplicate records.
+## The problem
 
-- **Bidirectional PaperBridge synchronization (Phase 5)**:
-  - PaperBridge v2 `TASK_UPDATE` and `TASK_ACK` envelopes with strict Zod payload validation, SHA-256 integrity checks, and the existing 2,048-byte QR payload ceiling. Version 1 `TASK_CREATE` decoding remains compatible.
-  - Local edits, status changes, soft deletion, and conflict resolutions retain append-only operation history. Update QRs export individual operations in revision order with base/result task-state hashes, parent operation IDs, and stable message IDs for retries.
-  - Update import classifies applicable, duplicate, stale, conflicting, invalid, and missing-history messages. Accepted updates atomically advance IndexedDB state and operation/import history; missing earlier updates can be rescanned after their dependencies arrive.
-  - Concurrent branches remain intact in persistent conflict records. Task Details shows local and incoming versions with Keep Local and Accept Incoming actions. Resolution creates a new transferable operation referencing both branches; two-device convergence is tested.
-  - Acknowledgment QRs identify a received message and operation. The sender accepts them only for a matching outgoing update, records duplicates idempotently, and does not change the task revision.
-  - Send/Receive screens support task, update, and acknowledgment QRs using camera or local image upload. Generated PNGs are checked with the local QR decoder before display; no transport server is involved.
+Emergency coordination commonly assumes three things that may not exist during a disruption:
 
-- **Offline multilingual task communication (Phase 4)**:
-  - Bundled English (`en`), Malayalam (`ml`), and Tamil (`ta`) dictionaries for structured task actions, items, units, priorities, statuses, and task/QR workflow labels.
-  - Backward-compatible optional `StructuredTaskInstruction` with Zod-validated canonical action, item, and unit codes.
-  - Language-specific task templates that render structured instructions immediately without mutating task IDs, revisions, or stored canonical data.
-  - Persisted local language preference with an English default; selected language restores after refresh.
-  - Structured task creation with localized action/item/unit controls, live instruction preview, optional notes, and continued free-text task support.
-  - Multilingual structured task display in task lists, task details, PaperBridge send, and PaperBridge receive previews.
-  - PaperBridge v1 structured-instruction round trips, checksum protection, duplicate prevention, and legacy QR compatibility.
+1. A working internet connection.
+2. A shared network between devices.
+3. A common language between participants.
 
-- **PaperBridge QR Protocol (`RELAY_MIDEN_PAPERBRIDGE` v1)**:
-  - Versioned envelope format with unique message ID, sender device ID, creation timestamp, and validated task payload.
-  - Deterministic canonical serialization (lexicographically ordered keys, omitted undefined properties).
-  - SHA-256 integrity checksums computed via the standard Web Crypto API (`crypto.subtle`).
-  - Strict payload capacity ceiling (2,048 bytes) to ensure high scan reliability.
-  - Clear error detection for invalid JSON, unsupported protocols/versions, schema errors, and tampered checksums.
-- **Send via QR**:
-  - Live selection of any locally created task.
-  - Dynamic QR matrix generation with Level M error correction and 4-module quiet zone using the centralized Forest Green palette.
-  - One-click PNG image download (`relay-miden-task-[id].png`).
-  - Clipboard payload copy and message ID regeneration.
-  - Real-time payload byte size and checksum preview.
-- **Receive via QR**:
-  - User-activated live camera scanning with rear-facing camera preference (`html5-qrcode`).
-  - Insecure context detection: warns when accessed over unencrypted LAN IP HTTP and routes users to image upload.
-  - 100% offline client-side QR image file upload (`.png`, `.jpg`, `.webp`) decoded locally via HTML5 Canvas and `jsQR`.
-  - Automatic camera stream release and cleanup on page navigation or modal dismissal.
-  - Visual pre-import review card showing action, title, description, quantity, unit, location, priority, status, sender device ID, and creation timestamp.
-  - Explicit user confirmation required before any data is written.
-- **Atomic IndexedDB Import & Deduplication**:
-  - Atomic Dexie transaction spanning `tasks`, `operations`, and `imports` stores.
-  - Preserves original task UUID, original creator device UUID, creation timestamp, and revision number.
-  - Records `TASK_IMPORT` audit entry identifying the receiving device as actor while linking source `messageId`.
-  - Duplicate scan suppression: prevents duplicate task creation and duplicate operation logging.
-  - Conflict protection: preserves local data if an incoming QR code contains a differing task revision.
-  - Soft-delete protection: prevents deleted tasks from being silently resurrected via QR scan.
-- **Offline Task Engine (Phase 2)**:
-  - Dexie.js / IndexedDB offline database (`relay-miden-db`) with `tasks`, `operations`, `settings`, and `imports` tables.
-  - Zod runtime validation schemas for tasks, inputs, and operation payloads in `@relay-miden/shared`.
-  - Monotonic revision incrementing and `parentRevision` tracking.
-  - Persistent anonymous device UUID identity auto-provisioned in IndexedDB.
-  - Live reactive queries (`useLiveQuery`) updating dashboard metrics and filterable task views.
-  - Real-time search across titles, locations, and descriptions, multi-criteria status/priority filters, and deterministic sorting.
-  - Status lifecycle progression (`pending` -> `acknowledged` -> `in_progress` -> `completed`) and controlled task reopening.
-- **Foundation & Design System (Phase 1)**:
-  - Exact Forest Green `#004225`, Beige `#F5F5DC`, Amber `#FFB000`, and Peach `#FFCF9D` palette in `palette.css`.
-  - Metric icons, priorities, and statuses use outline icons/colored text without colored background fills or pills.
-  - Real Express `/health` endpoint returning phase status; strictly backend-independent task CRUD and QR transfer.
+Relay Miden separates task meaning from transport. Every task is stored locally first, represented through validated canonical data, and exchanged through whichever channel is available.
 
-### In progress
+## Capability map
 
-- No active implementation phase. Phase 5 verification is complete.
+| Constraint                             | Relay Miden response                                                       | Network required?         |
+| -------------------------------------- | -------------------------------------------------------------------------- | ------------------------- |
+| Public internet unavailable            | Task engine runs entirely from IndexedDB                                   | No                        |
+| Devices have no shared network         | PaperBridge transfers tasks and updates through QR                         | No                        |
+| Devices share local Wi-Fi or a hotspot | Socket.IO synchronizes through a laptop-hosted coordinator                 | Local network only        |
+| Participants use different languages   | Canonical structured instructions render in English, Malayalam, or Tamil   | No                        |
+| A device temporarily disconnects       | Durable outbox stores operations and replays them after reconnect          | No while editing          |
+| Browser or app is restarted offline    | PWA app shell starts from Workbox cache and task data loads from IndexedDB | No, after initial caching |
 
-### Planned
+## Features
 
-Local Wi-Fi/LAN transport, durable synchronization queues, installable PWA behavior, final operational UI, and demo preparation. All core functionality must work without paid APIs or cloud infrastructure.
+### Offline task management
 
-## PaperBridge: How to Transfer Tasks Offline
+- Create free-text or structured operational tasks.
+- Edit title, action, quantity, unit, location, priority, and notes.
+- Advance tasks through a controlled status lifecycle and explicitly reopen completed work.
+- Soft-delete tasks without removing synchronization history.
+- Search title, description, and location; filter by status and priority; sort by date or priority.
+- Calculate dashboard statistics and recent activity reactively from IndexedDB.
+- Persist an anonymous device UUID without accounts or authentication.
+- Validate all saved records with shared Zod schemas.
 
-PaperBridge allows one device to transfer a task to another using a QR code displayed on a screen or printed on paper without internet, Wi-Fi, Bluetooth, or cloud infrastructure.
+### Multilingual structured communication
 
-### Sending a Task
+- Bundled English (`en`), Malayalam (`ml`), and Tamil (`ta`) dictionaries.
+- Canonical action, item, and unit codes remain unchanged between languages.
+- Structured instructions render in the selected local language immediately.
+- Language preference persists locally across refreshes.
+- Arbitrary locations and notes stay in the language entered by the user.
 
-1. Open Relay Miden and navigate to **Send via QR** (`/send`).
-2. Select any local task from the dropdown.
-3. The scannable QR code is instantly rendered.
-4. Display the QR code on screen for another device to scan, click **Download QR** to save a PNG image, or click **Copy Payload** to copy the raw envelope.
+### PaperBridge QR synchronization
 
-### Receiving a Task
+- Version 1 `TASK_CREATE` envelopes for transferring a task to a new device.
+- Version 2 `TASK_UPDATE` envelopes for edits, status changes, deletions, and conflict resolutions.
+- Version 2 `TASK_ACK` envelopes for returning an application receipt.
+- Deterministic canonical JSON, SHA-256 integrity validation, and stable IDs on retry.
+- QR generation, PNG download, payload copying, live camera scanning, image upload, and camera flipping.
+- Client-side parsing and image decoding with no QR service or remote API.
+- Duplicate detection, missing-parent handling, stale-update classification, and conflict preservation.
+- A 2,048-byte payload ceiling to keep QR codes reliably scannable.
 
-1. Open Relay Miden on the receiving device and navigate to **Receive via QR** (`/receive`).
-2. Choose one of two methods:
-   - **Use camera**: Click to request camera access, point the camera at the QR code, and align within the frame.
-   - **Upload image**: Click to select a PNG or JPEG photo containing a PaperBridge QR code. Decoded entirely inside your browser.
-3. Review the decoded task details (title, action, quantity, location, priority, and original creator device).
-4. Click **Import Task**. The task is atomically saved to local IndexedDB storage and immediately appears on your Dashboard and Tasks list.
+### LAN synchronization and recovery
 
-### Sending and receiving a task update
+- Local Express and Socket.IO coordinator with persistent SQLite storage.
+- Configurable host, port, CORS origin, session token, and HTTPS certificates.
+- Server acknowledgment only after durable SQLite acceptance.
+- Real-time operation broadcast and incremental cursor-based catch-up.
+- Durable IndexedDB outbox with `PENDING`, `IN_FLIGHT`, `ACKNOWLEDGED`, `BLOCKED`, and `FAILED` states.
+- Automatic reconnection with bounded exponential backoff and jitter.
+- Parent-first causal replay and idempotent lost-acknowledgment recovery.
+- Manual **Connect & Sync** for explicit bidirectional reconciliation.
+- Accurate connection, queue, error, and synchronization indicators.
+- Shared operation semantics across QR and LAN transports.
 
-1. Both devices need the same task first. Transfer a **Send Task** QR if the receiver has no task copy.
-2. Edit, advance, or delete the task locally. Open **Send via QR**, select the task, then choose **Send Update**. Select each unsent local operation in revision order; the same operation reuses its stored message ID on retry. Resolved conflicts default to the resolution operation.
-3. On the other device, use **Receive via QR** to scan or upload the image. Review the proposed fields and choose **Apply Update**. The task changes only after the IndexedDB transaction succeeds.
-4. If an earlier revision is missing, transfer that earlier update first, then scan the pending QR again. If branches conflict, open Task Details to compare them and choose **Keep Local Version** or **Accept Incoming Version**. Export the resulting resolution through **Send Update** so the other device can converge.
-5. After an update applies, the receiver shows a return **Acknowledgment** QR. The original sender scans it and records a matching acknowledgment. A duplicate ACK leaves the task untouched. The Send page can also regenerate an ACK for a previously applied incoming update.
+### Progressive Web App
 
-QR exchange is asynchronous: neither device receives changes or acknowledgments until someone physically transfers the appropriate code. A SHA-256 checksum detects corruption but does not authenticate another device.
+- Installable manifest with standard, high-resolution, maskable, Apple touch, and favicon assets.
+- Workbox-generated app-shell precache and offline navigation fallback.
+- API, health, and Socket.IO paths excluded from navigation caching.
+- Chromium/Android install prompt support and iOS Add to Home Screen guidance.
+- User-controlled service-worker updates without clearing IndexedDB.
+- Secure HTTPS/WSS development workflow for mobile cameras and LAN synchronization.
+- Explicit cache-error reporting when offline startup is unavailable.
 
-### Browser Camera & Security Notes
+### Responsive interface
 
-- Modern browser security policies require a **secure context** (`HTTPS` or `localhost`) for camera access (`getUserMedia`).
-- If accessing Relay Miden over a local network HTTP address (e.g. `http://192.168.1.50:5173`), the browser will disallow camera access. The UI automatically detects this and provides the **Upload image** option, which works 100% offline without camera permissions.
+- Forest-green desktop sidebar, mobile header, and dedicated mobile bottom navigation.
+- Responsive dashboard, forms, task lists, details, QR screens, connections, and settings.
+- Touch-friendly controls and keyboard-accessible form labels.
+- Centralized palette with unfilled metric icons and plain-text priority/status indicators.
 
-## Stack
+## Architecture
 
-React 19, Vite 8, TypeScript 6 (strict), Tailwind CSS 4 with its Vite plugin, React Router 8, Dexie.js 4, `qrcode`, `html5-qrcode`, `jsqr`, Lucide React, Node.js 24, Express 5, npm workspaces, ESLint 10, Prettier 3, Vitest 5, and Playwright for browser verification. Dependency versions are locked in `package-lock.json`. No paid service or cloud API is used.
+```mermaid
+flowchart LR
+    UI[React UI] --> REPO[Task and Sync Repositories]
+    REPO --> IDB[(Dexie / IndexedDB)]
+    IDB --> TASKS[Tasks]
+    IDB --> OPS[Append-only Operations]
+    IDB --> OUTBOX[Durable Outbox]
+    IDB --> SETTINGS[Settings and Device ID]
+
+    OPS --> QR[PaperBridge QR]
+    QR --> OTHER[Disconnected Device]
+
+    OUTBOX --> SOCKET[Socket.IO Client]
+    SOCKET --> SERVER[Express + Socket.IO Coordinator]
+    SERVER --> SQLITE[(SQLite WAL)]
+    SERVER --> PEERS[Connected LAN Peers]
+
+    SW[Workbox Service Worker] --> SHELL[Cached App Shell]
+    SHELL --> UI
+```
+
+The browser database remains the primary source of truth for the current device. QR and LAN are transports for immutable operations; neither transport directly replaces local task records without validation.
+
+### Transport-to-operation mapping
+
+| User action              | Durable operation     | QR representation               | LAN representation                   |
+| ------------------------ | --------------------- | ------------------------------- | ------------------------------------ |
+| Create task              | `TASK_CREATE`         | PaperBridge v1 `TASK_CREATE`    | LAN `TASK_CREATE` payload            |
+| Edit task                | `TASK_UPDATE`         | PaperBridge v2 `TASK_UPDATE`    | LAN `TASK_UPDATE` payload            |
+| Advance or reopen status | `TASK_UPDATE`         | PaperBridge v2 `TASK_UPDATE`    | LAN `TASK_UPDATE` payload            |
+| Soft-delete task         | `TASK_DELETE`         | PaperBridge v2 tombstone update | LAN causal update                    |
+| Resolve conflict         | `TASK_RESOLVE`        | PaperBridge v2 resolution       | LAN causal resolution                |
+| Import initial QR task   | `TASK_IMPORT` audit   | Receiver-side only              | Not republished as a local create    |
+| Acknowledge QR update    | Acknowledgment record | PaperBridge v2 `TASK_ACK`       | Server acceptance is transport-level |
+
+### Local data mapping
+
+| IndexedDB table   | Purpose                         | Key behavior                         |
+| ----------------- | ------------------------------- | ------------------------------------ |
+| `tasks`           | Current materialized task state | Soft deletes remain stored           |
+| `operations`      | Append-only mutation history    | Stable operation IDs and revisions   |
+| `settings`        | Device ID and preferences       | Survives refresh and restart         |
+| `imports`         | Received QR message ledger      | Prevents duplicate imports           |
+| `outgoing`        | Generated QR updates            | Preserves message identity for retry |
+| `acknowledgments` | QR receipts                     | Idempotent matching                  |
+| `conflicts`       | Concurrent branches             | Retained until explicit resolution   |
+| `outbox`          | Pending LAN delivery            | Replayed after reconnect             |
+
+Server-side SQLite persists coordinator metadata, devices, task projections, append-only operations, and conflicts in WAL mode.
+
+## Task and synchronization lifecycles
+
+### Task status mapping
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending
+    Pending --> Acknowledged
+    Acknowledged --> InProgress
+    InProgress --> Completed
+    Completed --> Pending: Explicit reopen
+```
+
+| Stored value   | UI label     | Meaning                                         |
+| -------------- | ------------ | ----------------------------------------------- |
+| `pending`      | Pending      | Created but not yet accepted                    |
+| `acknowledged` | Acknowledged | A coordinator or field device accepted the task |
+| `in_progress`  | In Progress  | Work has started                                |
+| `completed`    | Completed    | Work finished                                   |
+
+### PaperBridge round trip
+
+```mermaid
+sequenceDiagram
+    participant A as Device A
+    participant QR as PaperBridge QR
+    participant B as Device B
+
+    A->>A: Create task O1
+    A->>QR: Export TASK_CREATE
+    QR->>B: Scan or upload
+    B->>B: Validate and import O1
+    B->>B: Edit task and create O2
+    B->>QR: Export TASK_UPDATE O2
+    QR->>A: Scan or upload
+    A->>A: Validate ancestry and apply O2
+    A->>QR: Generate TASK_ACK
+    QR->>B: Record acknowledgment
+```
+
+### LAN replay and catch-up
+
+```mermaid
+sequenceDiagram
+    participant Browser as Browser / IndexedDB
+    participant Outbox as Durable Outbox
+    participant Server as LAN Coordinator / SQLite
+    participant Peer as Peer Device
+
+    Browser->>Browser: Commit task and operation
+    Browser->>Outbox: Enqueue atomically
+    Outbox->>Server: Submit in causal order
+    Server->>Server: Validate and persist
+    Server-->>Outbox: APPLIED or ALREADY_APPLIED
+    Server-->>Peer: Broadcast operation
+    Peer->>Peer: Apply through shared causal engine
+    Outbox->>Server: Request missed operations from cursor
+```
+
+## Language mapping
+
+Structured instructions store language-neutral codes and render through local dictionaries.
+
+| Canonical code | English | Malayalam              | Tamil      |
+| -------------- | ------- | ---------------------- | ---------- |
+| `DELIVER`      | Deliver | എത്തിക്കുക             | வழங்கவும்  |
+| `WATER`        | Water   | വെള്ളം                 | தண்ணீர்    |
+| `BOTTLE`       | Bottles | കുപ്പി                 | பாட்டில்   |
+| `pending`      | Pending | തീർപ്പുകൽപ്പിക്കാത്തത് | நிலுவையில் |
+| `urgent`       | Urgent  | അടിയന്തിരം             | அவசரம்     |
+
+The canonical record, task ID, revisions, hashes, and synchronization history do not change when the display language changes.
+
+## Route map
+
+| Route          | Screen         | Main responsibility                                             |
+| -------------- | -------------- | --------------------------------------------------------------- |
+| `/`            | Dashboard      | Live statistics, recent tasks, connectivity, and quick creation |
+| `/create`      | Create Task    | Full structured or free-text task form                          |
+| `/tasks`       | Tasks          | Search, status/priority filters, sorting, and navigation        |
+| `/tasks/:id`   | Task Details   | Timeline, editing, status, conflict resolution, and deletion    |
+| `/send`        | Send via QR    | Task, update, or acknowledgment QR export                       |
+| `/receive`     | Receive via QR | Camera/image decode, validation, preview, and import            |
+| `/connections` | Connections    | LAN configuration, manual Sync, and outbox status               |
+| `/settings`    | Settings       | Language, identity, PWA installation, cache, and updates        |
+
+## Technology stack
+
+| Layer              | Technology                                           |
+| ------------------ | ---------------------------------------------------- |
+| Frontend           | React 19, Vite 8, TypeScript 6, React Router 8       |
+| Styling            | Tailwind CSS 4, CSS variables, DM Sans, Lucide React |
+| Local persistence  | Dexie 4 and IndexedDB                                |
+| Validation         | Zod shared schemas                                   |
+| QR                 | `qrcode`, `html5-qrcode`, `jsQR`, SHA-256            |
+| LAN                | Socket.IO Client, Express 5, Socket.IO               |
+| Server persistence | Built-in `node:sqlite` with WAL mode                 |
+| PWA                | `vite-plugin-pwa` and Workbox                        |
+| Quality            | Vitest, fake-indexeddb, Playwright, ESLint, Prettier |
+| Workspace          | npm workspaces                                       |
 
 ## Repository structure
 
@@ -161,193 +271,205 @@ React 19, Vite 8, TypeScript 6 (strict), Tailwind CSS 4 with its Vite plugin, Re
 relay-miden/
 ├── apps/
 │   ├── web/
-│   │   ├── public/assets/
-│   │   ├── src/
-│   │   │   ├── components/{dashboard,layout,qr,tasks,ui}/
-│   │   │   ├── db/{database.ts,errors.ts,task-repository.ts,task-repository.test.ts}
-│   │   │   ├── hooks/
-│   │   │   ├── lib/
-│   │   │   ├── pages/{ConnectionsPage.tsx,CreateTaskPage.tsx,DashboardPage.tsx,ReceivePage.tsx,SendPage.tsx,SettingsPage.tsx,TaskDetailsPage.tsx,TasksPage.tsx}
-│   │   │   ├── services/lan/{client.ts,connection.ts,index.ts,lan-sync.test.ts,protocol.ts,sync.ts}
-│   │   │   ├── services/paperbridge/{checksum.ts,decode.ts,encode.ts,index.ts,qr.ts,paperbridge.test.ts}
-│   │   │   ├── services/sync/{sync-repository.ts,sync-repository.test.ts}
-│   │   │   ├── styles/{palette.css,globals.css}
-│   │   │   ├── App.tsx
-│   │   │   └── main.tsx
-│   │   ├── index.html
-│   │   ├── vite.config.ts
-│   │   └── package.json
-│   └── server/src/{app.ts,app.test.ts,index.ts,server.test.ts,config/,db/,repositories/,services/,sockets/}
-├── packages/shared/src/{index.ts,lan.ts,multilingual.ts,paperbridge.ts,paperbridge-v2.ts,sync.ts,tasks.ts}
-├── scripts/dev.mjs
-├── tests/ui.spec.ts
-├── docs/{architecture.md,design-system.md,implementation-plan.md,lan-sync-protocol.md,multilingual-protocol.md,paperbridge-protocol.md,synchronization-protocol.md}
-├── docs/history/
-├── docs/verification/
+│   │   ├── public/                 # PWA icons and static assets
+│   │   └── src/
+│   │       ├── components/         # Layout, dashboard, task, QR, PWA, and UI
+│   │       ├── db/                 # Dexie schema and task repository
+│   │       ├── hooks/              # Language, LAN, and PWA state
+│   │       ├── i18n/               # English, Malayalam, and Tamil
+│   │       ├── pages/              # Routed screens
+│   │       ├── services/           # PaperBridge, causal sync, and LAN
+│   │       └── styles/             # Central palette and global styles
+│   └── server/src/                 # Express, Socket.IO, SQLite, and sync services
+├── packages/shared/src/            # Zod schemas and transport-neutral types
+├── docs/                            # Architecture, protocols, setup, and history
+├── scripts/                         # Development, certificates, and icons
+├── tests/                           # Playwright browser coverage
 ├── AGENTS.md
 ├── README.md
-├── LICENSE
-├── package.json
-└── ...
+└── package.json
 ```
 
-## Prerequisites and installation
+## Prerequisites
 
-Use **Node.js 24 LTS** and **npm 11+**.
+- Node.js `>=24 <25`
+- npm `>=11`
+- Chromium installed by Playwright for browser tests
+- Optional: `mkcert` or OpenSSL for trusted LAN HTTPS certificates
 
-```sh
+```powershell
 npm ci
-# Only needed for browser tests:
 npx playwright install chromium
 ```
 
-## Development
+## Running Relay Miden
 
-```sh
-npm run dev         # frontend + backend
-npm run dev:web     # frontend only: http://127.0.0.1:5173
-npm run dev:server  # backend only: http://127.0.0.1:3001/health
+### Single laptop
+
+```powershell
+npm run dev
 ```
 
-## Build, test, and formatting
+- Web application: `http://127.0.0.1:5173`
+- Health endpoint: `http://127.0.0.1:3001/health`
 
-```sh
-npm run typecheck
-npm run lint
-npm test
-npm run build
-npm run test:e2e
-npm run format:check
-npm run format
-npm run preview -w @relay-miden/web  # production UI on :4173 after build
-npm run start -w @relay-miden/server # compiled server after build
+### Same-Wi-Fi laptop and phone over HTTP
+
+```powershell
+npm run dev:lan
 ```
+
+- Phone URL: `http://<laptop-ip>:5173`
+- LAN coordinator: `http://<laptop-ip>:3001`
+- Camera and service-worker features may be restricted on an insecure LAN origin. QR image upload remains available.
+
+### Secure laptop and phone demo
+
+```powershell
+npm run cert:gen
+npm run dev:https
+```
+
+1. Run `ipconfig` and find the IPv4 address of the active Wi-Fi adapter.
+2. Trust the generated local certificate authority on the phone.
+3. Open `https://<laptop-ip>:5173` on the phone.
+4. Verify `https://<laptop-ip>:3001/health` from the phone.
+5. Enter `https://<laptop-ip>:3001` on both devices' Connections page.
+
+`127.0.0.1` always refers to the current device and must not be entered on the phone. See [PWA and secure LAN setup](docs/pwa-offline-setup.md) and [physical synchronization testing](docs/synchronization-repair-testing.md).
+
+## Environment variables
+
+Copy `.env.example` to `.env` and adjust only what the demo needs.
+
+| Variable            | Purpose                                   | Typical value                            |
+| ------------------- | ----------------------------------------- | ---------------------------------------- |
+| `HOST`              | Server bind interface                     | `127.0.0.1` locally or `0.0.0.0` for LAN |
+| `PORT`              | Express/Socket.IO port                    | `3001`                                   |
+| `DB_PATH`           | Persistent SQLite file                    | `apps/server/data/relay-miden.sqlite`    |
+| `LAN_SESSION_TOKEN` | Optional shared LAN secret                | A local private value                    |
+| `CORS_ORIGIN`       | Allowed browser origin(s)                 | Local app origin                         |
+| `HTTPS`             | Enable generated development TLS settings | `true`                                   |
+| `SSL_KEY_FILE`      | TLS private-key path                      | `certs/dev-key.pem`                      |
+| `SSL_CRT_FILE`      | TLS certificate path                      | `certs/dev-cert.pem`                     |
+| `VITE_API_URL`      | Reserved public frontend API base         | `http://127.0.0.1:3001`                  |
+
+Never place credentials in a `VITE_` variable because Vite exposes them to the browser bundle. Generated keys and certificates are ignored by the repository configuration.
+
+## Commands
+
+| Command                                | Purpose                                     |
+| -------------------------------------- | ------------------------------------------- |
+| `npm run dev`                          | Start frontend and server locally           |
+| `npm run dev:lan`                      | Bind services for LAN HTTP access           |
+| `npm run cert:gen`                     | Generate a multi-IP development certificate |
+| `npm run dev:https`                    | Start frontend and server over HTTPS/WSS    |
+| `npm run typecheck`                    | Run strict TypeScript checks                |
+| `npm run lint`                         | Run ESLint with zero-warning policy         |
+| `npm test`                             | Run Vitest unit and integration tests       |
+| `npm run test:e2e`                     | Run Playwright browser tests                |
+| `npm run build`                        | Build shared, server, and web workspaces    |
+| `npm run format:check`                 | Verify Prettier formatting                  |
+| `npm run format`                       | Format the workspace                        |
+| `npm run preview -w @relay-miden/web`  | Preview the production UI on port 4173      |
+| `npm run start -w @relay-miden/server` | Start the compiled LAN server               |
+
+## Two-minute judging demo
+
+1. **Offline task engine — 30 seconds:** create an urgent structured task, open its details, advance its status, and refresh. Show that the task and operation timeline persist without a backend request.
+2. **Multilingual rendering — 15 seconds:** switch to Malayalam or Tamil and reopen the task. Explain that canonical codes and synchronization identity remain stable.
+3. **PaperBridge — 35 seconds:** transfer the task from Device A to Device B with **Send Task**. Edit it on B; the Send page automatically selects **Send Update**. Apply it on A and show the acknowledgment QR.
+4. **LAN recovery — 25 seconds:** connect both devices, create or update a task, and show the peer update without refresh. Briefly disconnect one device, edit locally, reconnect, and show the outbox return to zero.
+5. **Offline PWA — 15 seconds:** after **Ready offline** appears, disable network access and navigate between Dashboard, Tasks, and Task Details.
+
+Keep a downloaded QR PNG ready. Image upload is the most reliable fallback if venue lighting, focus, or certificate configuration affects the live camera.
+
+## Validation and data safety
+
+- Task and operation writes use IndexedDB transactions.
+- Task mutations and outbox entries commit atomically.
+- QR imports validate size, schema, version, checksum, ancestry, and operation identity.
+- Server acknowledgments follow SQLite persistence.
+- Cursor updates occur only after incoming operations commit locally.
+- Duplicate operation delivery is idempotent.
+- Conflicting concurrent updates remain available for explicit resolution.
+- Soft-deleted tasks are not silently resurrected.
+- Service-worker updates do not clear IndexedDB.
+- Development and tests do not reset the production browser database or persistent SQLite file.
 
 ## Design system
 
-Forest Green `#004225`, Beige `#F5F5DC`, Amber `#FFB000`, and Peach `#FFCF9D` are declared centrally in [palette.css](apps/web/src/styles/palette.css). Components use variables or derived Tailwind tokens. Metric icons, priorities, and statuses use outline icons/colored text **without colored background fills or pills**. See [design-system.md](docs/design-system.md).
+All brand colors are centralized in [`palette.css`](apps/web/src/styles/palette.css).
 
-## Local Network Synchronization: How to Connect Devices on a LAN
+| Token        | Hex       | Use                                                    |
+| ------------ | --------- | ------------------------------------------------------ |
+| Forest Green | `#004225` | Sidebar, mobile headers, identity, and primary accents |
+| Beige        | `#F5F5DC` | Main canvas and readable content surfaces              |
+| Amber        | `#FFB000` | Primary actions and meaningful highlights              |
+| Peach        | `#FFCF9D` | Restrained supporting accents                          |
 
-Phase 6 enables real-time synchronization between multiple devices connected to the same Wi-Fi network or mobile hotspot without public internet access.
-
-### 1. Start the LAN Server (Host Coordinator)
-
-On the coordinator host device:
-
-```sh
-# Start the local server
-npm run dev:server
-# Or after build:
-npm run start -w @relay-miden/server
-```
-
-The server binds to `0.0.0.0:3001` by default and stores persistent data in `apps/server/data/relay-miden.sqlite` using SQLite WAL mode.
-
-**Environment Variables**:
-
-- `PORT`: Port to listen on (default: `3001`).
-- `HOST`: Host interface to bind to (default: `0.0.0.0` for LAN access).
-- `DB_PATH`: Path to SQLite database (default: `apps/server/data/relay-miden.sqlite`).
-- `LAN_SESSION_TOKEN`: Optional shared secret required from connecting devices.
-- `CORS_ORIGIN`: Allowed origins (default: `*` for local network access).
-
-### 2. Connect Client Devices
-
-1. Ensure all devices are connected to the same Wi-Fi network or mobile hotspot.
-2. Note the LAN IP address of the coordinator host (e.g., `192.168.1.50`).
-3. Open Relay Miden on any device and navigate to **Connections** (`/connections`).
-4. Enter the **LAN Server Address**: `http://192.168.1.50:3001`.
-5. Enter the **Session Token** if configured on the host.
-6. Click **Connect to LAN**. The status advances from `Connecting...` to `Connected` once device registration is acknowledged by the server.
-
-### 3. Real-Time Synchronization & Recovery
-
-- **Live Propagation**: While connected, any task created, edited, status updated, or conflict resolved is committed locally to IndexedDB and immediately submitted to the LAN server. The server persists the change in SQLite and broadcasts it to all other connected peers.
-- **Offline Independence**: If a device disconnects from the LAN, task creation and editing continue without interruption in local IndexedDB.
-- **Manual Sync Recovery**: Reconnecting devices can click **Sync Now** on the Connections page to catch up on any missed server operations and submit pending local operations.
-- **Conflict Handling**: If two devices concurrently modify a task while disconnected, both branches are preserved using Phase 5 causal ancestry. Users resolve the conflict in the Task Details view via _Keep Local_ or _Accept Incoming_, creating a transferable `TASK_RESOLVE` operation that converges both devices.
-- **QR / LAN Compatibility**: Tasks imported via PaperBridge QR and synced over LAN share the exact same UUIDs, revisions, and state hashes without duplicate creation.
-
-### 4. Network and Browser Considerations
-
-- **Firewall**: Ensure the host firewall permits inbound TCP traffic on port 3001.
-- **Camera Insecure Context**: Browsers disable camera access (`getUserMedia`) on unencrypted HTTP LAN IPs (`http://192.168.x.x`). Relay Miden automatically detects this and directs users to offline QR image file upload.
-- **HTTPS Mixed Content**: If the web frontend is hosted under HTTPS, browsers may block insecure `http://` or `ws://` connections to local LAN IPs.
-
-## Ten-phase roadmap
-
-1. Repository setup and design system — implemented and verified.
-2. Offline task engine — implemented and verified.
-3. PaperBridge QR protocol — implemented and verified.
-4. Multilingual communication — implemented and verified.
-5. Two-way QR task lifecycle — implemented and verified.
-6. Local Wi-Fi communication — implemented and verified.
-7. Offline queue and synchronization — implemented and verified.
-8. PWA and mobile readiness — implemented and verified.
-9. Final UI and mission control — planned.
-10. Testing and demo preparation — planned.
-
-See [implementation-plan.md](docs/implementation-plan.md), [architecture.md](docs/architecture.md), [pwa-offline-setup.md](docs/pwa-offline-setup.md), [offline-queue-recovery.md](docs/offline-queue-recovery.md), [lan-sync-protocol.md](docs/lan-sync-protocol.md), [paperbridge-protocol.md](docs/paperbridge-protocol.md), [synchronization-protocol.md](docs/synchronization-protocol.md), and [multilingual-protocol.md](docs/multilingual-protocol.md) for boundaries and technical details.
-
-## Verification results
-
-Verified through 25 October 2026 with Node 24.15.0, npm 11.12.1, and Chromium on Windows:
-
-| Check                       | Actual result                                                                                                                                                                                |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Dependency installation     | Passed; zero vulnerabilities reported by npm                                                                                                                                                 |
-| `npm run dev`               | Both workspace servers started; frontend returned HTTP 200                                                                                                                                   |
-| Live `GET /health`          | HTTP 200 with `{ "status": "ok", "service": "relay-miden-server", "phase": 2 }`                                                                                                              |
-| `npm run typecheck`         | Passed for web, server, and shared with zero errors                                                                                                                                          |
-| `npm run lint`              | Passed with zero warnings and zero errors                                                                                                                                                    |
-| `npm test`                  | 135 tests passed across 11 suites: 9 PWA/manifest/caching, 13 outbox/sync recovery, 7 client LAN, 12 server integration, and 94 Phase 1–5 regressions                                        |
-| `npm run build`             | Shared, server, and web production builds passed cleanly; PWA precache manifest generated with 32 entries (1,417 KiB)                                                                        |
-| `npm run test:e2e`          | 22 Playwright tests passed: 7 viewports without overflow, CRUD, languages, QR transfer, conflict convergence, LAN server controls, outbox queue, PWA manifest/meta, offline task navigation  |
-| Responsive coverage         | Verified across 7 viewport widths (320px–1440px) without horizontal overflow or uncaught page errors                                                                                         |
-| PWA Manifest & Icons        | W3C manifest generated with `#004225` theme color, `#F5F5DC` background, standalone mode; complete icon suite (192×192, 512×512, 512×512 maskable, apple-touch-icon, favicon)                |
-| Service Worker & App Shell  | Workbox generates `sw.js` precaching 32 essential assets; navigation fallback to `/index.html` with explicit `/api/`, `/socket.io/`, `/health/` exclusion denylist                           |
-| Offline Launch & Storage    | Application launches and navigates completely offline; IndexedDB tasks and outbox queues remain intact and are never cleared during cache updates                                            |
-| PWA Install & Updates       | Chromium `beforeinstallprompt` handling, iOS Safari Add to Home Screen instructions, standalone mode detection; non-intrusive update notification with user-controlled reload activation     |
-| Secure LAN HTTPS Tooling    | `npm run cert:gen` generates multi-IP SAN TLS certificates; `npm run dev:https` starts frontend and server with TLS/WSS; mobile camera access supported in secure context                    |
-| Durable Outbox & Recovery   | Verified atomic local mutation enqueueing, abandoned `IN_FLIGHT` recovery on restart, legacy backfill, and live outbox queue telemetry on dashboard/settings                                 |
-| Reconnection & Backoff      | Autonomous reconnection with bounded exponential backoff (1s–30s) and $\pm 20\%$ jitter; clean listener teardown; explicit disconnect suppression                                            |
-| Causal Replay & Idempotency | Verified parent-first revision replay (1 -> 2 -> 3), duplicate idempotence (`ALREADY_APPLIED`), lost ACK recovery, and missing-parent blocking                                               |
-| Contiguous Cursor Safety    | Verified server cursor advances only after local durable commits; invalid server sequence resets detected without data loss                                                                  |
-| Conflict Reconciliation     | Offline concurrent edits trigger Phase 5 causal detection; user resolutions generate canonical `TASK_RESOLVE` operations replaying over LAN to convergence                                   |
-| QR / LAN Interoperability   | PaperBridge QR imports tracked separately as `TASK_IMPORT` without false outbox publishing; shared operation IDs prevent duplicates                                                          |
-| `npm run format:check`      | Passed with 100% Prettier compliance                                                                                                                                                         |
-| LAN HTTP mobile UUID repair | `npm run typecheck`, lint, build, and format check passed; 58 targeted storage, sync, QR, and UUID tests passed. Full LAN socket tests remain sandbox-blocked by loopback `EACCES`.          |
-| Mobile camera QR repair     | Type check, lint, production build, format check, and 58 targeted task-storage, PaperBridge, and synchronization tests passed. Physical camera decoding requires a phone test after restart. |
-
-The production bundle passes, with Vite's existing advisory that the main JavaScript chunk exceeds 500 kB. Automated browser suites verify LAN UI controls, error states, and isolated client/server exchanges. Physical multi-device LAN testing on distinct hardware has not been manually verified this execution.
+Metric icons use outlines without tinted icon boxes. Priority and status values use colored text without filled pills. The interface avoids gradients, glow effects, glassmorphism, and decorative UI that obscures operational state.
 
 ## Known limitations
 
-- Background sync when all browser tabs are closed is not supported across all mobile browsers (especially iOS Safari); Relay Miden relies on the durable outbox to replay immediately upon app launch or reconnect.
-- Camera scanning requires HTTPS or localhost due to standard browser security policies on `getUserMedia`. Users accessing over an unencrypted local IP HTTP network must use the QR Image Upload option, or run `npm run dev:https` with locally trusted TLS certificates.
-- Physical device installation and camera access on actual mobile phones require running `npm run dev:https` and trusting the generated certificate on the phone; simulated headless browsers verify API presence and secure context detection.
-- Some mobile browsers restrict `crypto.randomUUID()` on unencrypted LAN HTTP origins. Relay Miden uses a secure `crypto.getRandomValues()` UUID fallback for this case; restart the development server after updating before testing on a phone.
-- Single QR payloads are capped at 2,048 bytes to ensure reliable scanning on mobile camera viewfinders.
-- Several local edits over QR require individual transfers in revision order. A missing operation is rejected and must be transferred before retrying the dependent update.
-- Conflict resolution supports choosing either complete branch. It does not offer field-by-field merging.
-- Legacy v1 task snapshots can act as shared ancestry for subsequent v2 edits. Historical operations that predate causal IDs are retained unchanged; the protocol never fabricates missing parent records.
-- Structured task codes and selected workflow UI are translated locally. Arbitrary locations and notes remain in the original language, by design.
+- The first visit must complete service-worker installation before offline launch is available.
+- Background synchronization while every browser tab is closed is not consistent across mobile browsers, especially iOS Safari.
+- Mobile camera access and PWA installation require HTTPS or localhost. HTTP LAN users can use QR image upload.
+- Physical phone certificate trust, camera focus, firewall rules, and venue Wi-Fi must be rehearsed on the actual devices.
+- PaperBridge messages are capped at 2,048 bytes and multiple updates must be transferred in causal order.
+- Conflict resolution selects one complete branch rather than merging individual fields.
+- Arbitrary task notes and location names are not machine-translated.
+- The production JavaScript bundle triggers Vite's advisory for chunks over 500 kB.
+
+## Roadmap
+
+| Phase | Scope                                     | Status                                                             |
+| ----- | ----------------------------------------- | ------------------------------------------------------------------ |
+| 1     | Repository foundation and design system   | Implemented and verified                                           |
+| 2     | Offline task engine                       | Implemented and verified                                           |
+| 3     | PaperBridge QR protocol                   | Implemented and verified                                           |
+| 4     | Offline multilingual communication        | Implemented and verified                                           |
+| 5     | Bidirectional QR task lifecycle           | Implemented and verified                                           |
+| 6     | Local Wi-Fi communication                 | Implemented and verified                                           |
+| 7     | Durable offline queue and synchronization | Implemented and verified                                           |
+| 8     | PWA and mobile readiness                  | Implemented and verified                                           |
+| 9     | Final mission-control UI polish           | Planned                                                            |
+| 10    | Testing and demo preparation              | Release matrix and demo guide verified; physical rehearsal remains |
+
+No Bluetooth mesh, cloud coordinator, paid translation service, or user-role system is implemented or claimed.
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Implementation plan](docs/implementation-plan.md)
+- [Design system](docs/design-system.md)
+- [PaperBridge protocol](docs/paperbridge-protocol.md)
+- [Bidirectional synchronization protocol](docs/synchronization-protocol.md)
+- [LAN synchronization protocol](docs/lan-sync-protocol.md)
+- [Offline queue recovery](docs/offline-queue-recovery.md)
+- [Multilingual protocol](docs/multilingual-protocol.md)
+- [PWA and secure LAN setup](docs/pwa-offline-setup.md)
+- [Physical synchronization test guide](docs/synchronization-repair-testing.md)
 
 ## Development history
 
-Every Codex execution must update this README and create a unique, immutable Markdown record in `docs/history/` named `phase-XX-YYYYMMDDTHHMMSSZ-unique.md`. Existing records must never be modified, overwritten, reused, or deleted.
+Execution history is append-only under `docs/history/`. Each entry records the objective, actual commands, results, limitations, and remaining work.
 
-- [Phase 1 initialization and verification — 2026-10-24](docs/history/phase-01-20261024T142943Z-9c4b1e.md)
-- [Phase 2 recovery and verification — 2026-10-24](docs/history/phase-02-recovery-20261024T153500Z-a7f3c2.md)
-- [Phase 3 PaperBridge QR communication and verification — 2026-10-24](docs/history/phase-03-20261024T173000Z-d4e8c1.md)
-- [Phase 4 multilingual communication audit, fixes, and verification — 2026-10-25](docs/history/phase-04-20261024T185518Z-b1e5d9.md)
-- [Phase 5 bidirectional PaperBridge synchronization and verification — 2026-10-25](docs/history/phase-05-20261024T193303Z-1590d1.md)
-- [Phase 6 LAN server and real-time local network synchronization — 2026-10-25](docs/history/phase-06-20261024T203500Z-7f8a12.md)
-- [Phase 7 durable offline queue, automatic reconnection, and synchronization recovery — 2026-10-25](docs/history/phase-07-20261024T211000Z-9e4a7b.md)
-- [Phase 7 LAN HTTP mobile-storage compatibility repair — 2026-10-25](docs/history/phase-07-20261024T215134Z-4b39f2.md)
-- [Phase 7 mobile camera QR scanning reliability repair — 2026-10-25](docs/history/phase-07-20261024T220919Z-c82f40.md)
-- [Phase 7 camera constraint correction — 2026-10-25](docs/history/phase-07-20261024T221306Z-7ad27c.md)
-- [Phase 8 Progressive Web App, offline launch, installability, and secure LAN — 2026-10-25](docs/history/phase-08-20261024T225500Z-e8f4a1.md)
+| Milestone                          | History                                                                                                                             |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Phase 1 foundation                 | [phase-01-20261024T142943Z-9c4b1e.md](docs/history/phase-01-20261024T142943Z-9c4b1e.md)                                             |
+| Phase 2 offline task engine        | [phase-02-recovery-20261024T153500Z-a7f3c2.md](docs/history/phase-02-recovery-20261024T153500Z-a7f3c2.md)                           |
+| Phase 3 PaperBridge                | [phase-03-20261024T173000Z-d4e8c1.md](docs/history/phase-03-20261024T173000Z-d4e8c1.md)                                             |
+| Phase 4 multilingual communication | [phase-04-20261024T185518Z-b1e5d9.md](docs/history/phase-04-20261024T185518Z-b1e5d9.md)                                             |
+| Phase 5 bidirectional QR           | [phase-05-20261024T193303Z-1590d1.md](docs/history/phase-05-20261024T193303Z-1590d1.md)                                             |
+| Phase 6 LAN synchronization        | [phase-06-20261024T203500Z-7f8a12.md](docs/history/phase-06-20261024T203500Z-7f8a12.md)                                             |
+| Phase 7 durable outbox             | [phase-07-20261024T211000Z-9e4a7b.md](docs/history/phase-07-20261024T211000Z-9e4a7b.md)                                             |
+| Phase 8 PWA                        | [phase-08-20261024T225500Z-e8f4a1.md](docs/history/phase-08-20261024T225500Z-e8f4a1.md)                                             |
+| Synchronization repair             | [phase-08-20261025T004943Z-synchronization-repair-final.md](docs/history/phase-08-20261025T004943Z-synchronization-repair-final.md) |
+| Final stabilization                | [phase-08-20261025T010927Z-final-stabilization.md](docs/history/phase-08-20261025T010927Z-final-stabilization.md)                   |
+| Final README                       | [phase-08-20261025T011859Z-final-readme.md](docs/history/phase-08-20261025T011859Z-final-readme.md)                                 |
+| Final README verification          | [phase-08-20261025T012150Z-final-readme-verification.md](docs/history/phase-08-20261025T012150Z-final-readme-verification.md)       |
 
-No Git commands were executed during Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Phase 6, Phase 7, or Phase 8. The original MIT [LICENSE](LICENSE) is preserved.
+## License
+
+This project is provided under the [MIT License](LICENSE).

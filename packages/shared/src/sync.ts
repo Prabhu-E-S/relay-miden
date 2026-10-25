@@ -9,6 +9,7 @@ import {
 } from './tasks.js';
 import { StructuredTaskInstructionSchema } from './multilingual.js';
 import { canonicalJsonStringify } from './paperbridge.js';
+import { sha256Hex } from './sha256.js';
 
 export const StateHashSchema = z.string().regex(/^[0-9a-f]{64}$/);
 
@@ -82,8 +83,7 @@ export async function taskStateHash(task: Task): Promise<string> {
   const bytes = new TextEncoder().encode(
     canonicalJsonStringify({ ...rest, deletedAt: deletedAt ?? null }),
   );
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return sha256Hex(bytes);
 }
 
 export function taskChanges(previous: Task, next: Task): TaskChanges {

@@ -374,7 +374,9 @@ test('two devices exchange task update and acknowledgment QR codes', async ({ br
     await b.getByRole('button', { name: 'Mark Acknowledged' }).click();
     await expect(b.getByText('Status updated to Acknowledged.')).toBeVisible();
     await b.setViewportSize({ width: 390, height: 780 });
-    await b.goto(`/send?task=${id}&mode=update`);
+    // An imported task with a local edit must default to a durable update QR.
+    // Sending the legacy snapshot here used to make Device A report an existing task.
+    await b.goto(`/send?task=${id}`);
     await expect(b.getByAltText('Task update PaperBridge QR code')).toBeVisible();
     expect(await b.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     const updateImage = (await b
@@ -475,7 +477,7 @@ test('connections page provides LAN server configuration and status controls', a
   const urlInput = page.getByLabel('LAN Server Address');
   await urlInput.fill('http://192.168.1.100:3001');
   await expect(page.getByRole('button', { name: 'Connect to LAN' })).toBeEnabled();
-  await expect(page.getByRole('button', { name: 'Sync Now' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Connect & Sync' })).toBeEnabled();
 
   // Test invalid URL input handling
   await urlInput.fill('invalid-url');

@@ -7,6 +7,7 @@ import {
   type Task,
 } from './tasks.js';
 import { StructuredTaskInstructionSchema } from './multilingual.js';
+import { sha256Hex } from './sha256.js';
 import { generateUuid } from './uuid.js';
 
 export const PaperBridgeProtocolIdentifier = 'RELAY_MIDEN_PAPERBRIDGE' as const;
@@ -114,21 +115,12 @@ export function canonicalJsonStringify(value: unknown): string {
 
 /**
  * Computes a deterministic SHA-256 checksum over a PaperBridge envelope excluding the checksum field.
- * Uses the Web Crypto subtle API available in both modern browsers and Node 19+.
+ * Uses Web Crypto where present and an equivalent local fallback on restricted LAN HTTP origins.
  */
 export async function computeEnvelopeChecksum(envelopeWithoutChecksum: unknown): Promise<string> {
   const canonical = canonicalJsonStringify(envelopeWithoutChecksum);
   const data = new TextEncoder().encode(canonical);
-  const cryptoObj = globalThis.crypto;
-  if (!cryptoObj?.subtle) {
-    throw new PaperBridgeError(
-      'Web Crypto API (crypto.subtle) is not available in this environment.',
-      'INVALID_CHECKSUM',
-    );
-  }
-  const hashBuffer = await cryptoObj.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return sha256Hex(data);
 }
 
 /**
